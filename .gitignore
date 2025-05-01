@@ -1,0 +1,41 @@
+# OS generated files #
+######################
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Compiled source #
+###################
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+
+
+# Intellij #
+############
+*.idea
+*.iml
+
+target/
+
+
+# Lab specific
+instrumented/
+instrumented_fuzzing/
+instrumented_symbolic/
+RERS/
+*.zip
+.classpath
+.project
+.settings/
+# .vscode/
+RERS2020Buggy/
+scripts/
+*.dot
