@@ -197,6 +197,8 @@ public class FuzzingLab {
                         sumDistances+=distance;
                 }
                 int newBranches=visitedBranches.size()-previousBranchCount;
+                //For penalyt coefficient, 
+                //sumDistances-=previousBranchCount*10;
                 return sumDistances;
         }
         static List<String>mutateTrace(List<String>trace, String[] inputSymbols)
@@ -289,7 +291,6 @@ public class FuzzingLab {
                 DistanceTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
 
                 // Place here your code to guide your fuzzer with its search.
-                int iterations=0;
                 int noImprovementCounter=0;
                 int previousBranchCount=0;
                 long deadline = System.currentTimeMillis() + TIME_BUDGET_MS;
@@ -302,11 +303,17 @@ public class FuzzingLab {
                                         currentTrace= fuzz(DistanceTracker.inputSymbols);
                                         System.out.printf("Covered %d branches, found %d error codes\n",
                                         visitedBranches.size(), discoveredErrorCodes.size());
-                                        System.out.printf("Time's up! Unique branches: %d, error codes: %d\n",
-                                        visitedBranches.size(), discoveredErrorCodes.size());
-                                        System.out.println("Error codes: " + discoveredErrorCodes);
-                                         isFinished = true;
+                                        previousBranchCount=visitedBranches.size();
+                                        if(visitedBranches.size()<=previousBranchCount)
+                                        {
+                                                noImprovementCounter++;
+                                        }
+                                        System.out.printf("No Improvement found in %d cases",noImprovementCounter);
                                 }
+                                System.out.printf("Time's up! Unique branches: %d, error codes: %d\n",
+                                 visitedBranches.size(), discoveredErrorCodes.size());
+                                 System.out.println("Error codes: " + discoveredErrorCodes);
+                                 isFinished = true;
                 }
         }
 
