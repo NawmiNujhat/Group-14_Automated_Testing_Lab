@@ -356,7 +356,7 @@ public class FuzzingLab {
                                 currentTrace = fuzz(DistanceTracker.inputSymbols);
                                 DistanceTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
                         } catch (SecurityException se) {
-
+                                discoveredErrorCodes.add(se.getMessage());
                         } catch (IllegalStateException ise) {
                                 discoveredErrorCodes.add(ise.getMessage());
                         } catch (Throwable t) {
@@ -389,9 +389,11 @@ public class FuzzingLab {
                 // discoveredErrorCodes.add(out);
                 // return;
                 // }
-                if (out.startsWith("error_") || out.contains("Error")) {
-                        System.out.println("Added Error Code" + out);
-                        discoveredErrorCodes.add(out.trim());
+                
+                if (out.contains("error_") || out.contains("Error")) {
+                        String error_code = out.replaceFirst("^Invalid input:\\s*", "");
+                        System.out.println("Added Error Code: " + error_code);
+                        discoveredErrorCodes.add(error_code.trim());
                 }
         }
 }
