@@ -1,6 +1,9 @@
 package nl.tudelft.instrumentation.fuzzing;
 
 import java.util.*;
+import java.util.stream.Collectors;
+import java.io.FileWriter;
+import java.io.IOException;
 
 /**
  * You should write your own solution using this class.
@@ -19,6 +22,7 @@ public class FuzzingLab {
         static final int TIME_BUDGET_MS = 5 * 60 * 1000;
         static final double RESTART_PROBABILITY = 0.1;
         static final double K = 0.1;
+        static final boolean RANDOM = true; // Update when switching fuzzing method
 
         static void initialize(String[] inputSymbols) {
                 // Initialise a random trace from the input symbols of the problem.
@@ -319,7 +323,12 @@ public class FuzzingLab {
                  * more branches. Right now we just generate a complete random sequence
                  * using the given input symbols. Please change it to your own code.
                  */
-                // return generateRandomTrace(inputSymbols);
+                if (RANDOM) {
+                        return generateRandomTrace(inputSymbols);
+                }
+
+                // Hill climbing implementation
+                
                 if (r.nextDouble() < RESTART_PROBABILITY) {
                         return generateRandomTrace(inputSymbols);
                 }
@@ -346,6 +355,7 @@ public class FuzzingLab {
                 int noImprovementCounter = 0;
                 int previousBranchCount = 0;
                 long deadline = System.currentTimeMillis() + TIME_BUDGET_MS;
+                List<String> bestTrace = null;
                 System.out.println("Starting fuzzing with hill climbing...");
                 while (System.currentTimeMillis() < deadline) {
                         System.out.printf("Time left: %d ms\n", (deadline - System.currentTimeMillis()));
@@ -368,6 +378,8 @@ public class FuzzingLab {
                         previousBranchCount = visitedBranches.size();
                         if (visitedBranches.size() <= previousBranchCount) {
                                 noImprovementCounter++;
+                        } else {
+                                bestTrace = currentTrace;
                         }
                         System.out.printf("No Improvement found in %d cases", noImprovementCounter);
                 }
@@ -375,6 +387,8 @@ public class FuzzingLab {
                                 visitedBranches.size(), discoveredErrorCodes.size());
                 System.out.println("Error codes: " + discoveredErrorCodes);
 
+                // Write results to csv
+                exportResultsToCSV(bestTrace);
         }
 
         /**
@@ -396,4 +410,30 @@ public class FuzzingLab {
                         discoveredErrorCodes.add(error_code.trim());
                 }
         }
+
+
+        static void exportResultsToCSV(List<String> bestTrace) {
+                String fileName = "fuzzing_results.csv";
+                boolean fileExists = new java.io.File(fileName).exists();
+                try (FileWriter writer = new FileWriter(fileName, true)) {
+                        if (!fileExists) {
+                                writer.write("# of Unique Branches, # of Unique Error Codes, Error Codes, Best Trace\n");
+                        }
+
+                        // Avoid comma issues
+                        String errorCodesJoined = discoveredErrorCodes.stream()
+                                .map(code -> code.replaceAll(",", ";").trim()) 
+                                .collect(Collectors.joining("|"));
+                        
+                        writer.write(visitedBranches.size() + ","
+                                + discoveredErrorCodes.size() + ","
+                                + errorCodesJoined + ","
+                                + bestTrace + "\n");
+
+                        System.out.println("Results written to " + fileName);
+                } catch (IOException e) {
+                        System.err.println("Failed to write results to CSV: " + e.getMessage());
+                }
+        }
+
 }
