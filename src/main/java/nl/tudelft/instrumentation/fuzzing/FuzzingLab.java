@@ -8,7 +8,7 @@ import java.util.*;
 public class FuzzingLab {
         static Random r = new Random();
         static List<String> currentTrace;
-        static int traceLength = 50;
+        static int traceLength = 10;
         static boolean isFinished = false;
         static boolean sawInvalid = false;
         static Map<Integer, Double> latestBranchDistances = new HashMap<>();
@@ -200,8 +200,9 @@ public class FuzzingLab {
                 } catch (SecurityException se) {
                         sawInvalid = true;
                 } catch (IllegalStateException ise) {
-                        discoveredErrorCodes.add(ise.getMessage()); // "error_93", etc.
-                        return Double.POSITIVE_INFINITY; // treat as terminal crash
+                        discoveredErrorCodes.add(ise.getMessage()); 
+                        // System.out.println(ise.getMessage());
+                        return Double.POSITIVE_INFINITY; 
                 } catch (Throwable t) {
                         t.printStackTrace();
                 }
@@ -289,6 +290,7 @@ public class FuzzingLab {
                 for (int i = 0; i < MUTATIONS_PER_ITERATION; i++) {
                         System.out.println("Mutating Trace");
                         List<String> mutatedTrace = mutateTrace(bestTrace, inputSymbols);
+                        System.out.println("Input Symbols: "+ inputSymbols);
                         System.out.println("Mutated Trace" + mutatedTrace);
                         double mutatedFitness = calculateFitness(mutatedTrace);
                         System.out.println("Mutated Fitness: " + mutatedFitness);
@@ -357,8 +359,10 @@ public class FuzzingLab {
                                 DistanceTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
                         } catch (SecurityException se) {
                                 discoveredErrorCodes.add(se.getMessage());
+                                // System.out.println(se.getMessage());
                         } catch (IllegalStateException ise) {
                                 discoveredErrorCodes.add(ise.getMessage());
+                                // System.out.println(ise.getMessage());
                         } catch (Throwable t) {
                                 t.printStackTrace();
                         }
