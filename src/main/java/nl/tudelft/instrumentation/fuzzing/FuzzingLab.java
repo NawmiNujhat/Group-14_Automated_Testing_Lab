@@ -17,12 +17,12 @@ public class FuzzingLab {
         static Map<Integer, Double> latestBranchDistances = new HashMap<>();
         static Set<Integer> visitedBranches = new HashSet<>();
         static Set<String> discoveredErrorCodes = new HashSet<>();
-        static Set<Integer> localBranches = new HashSet<>();
+        // static Set<Integer> localBranches = new HashSet<>();
         static final int MUTATIONS_PER_ITERATION = 20;
         static final int TIME_BUDGET_MS = 5 * 60 * 1000;
         static final double RESTART_PROBABILITY = 0.1;
         static final double K = 0.1;
-        static final boolean RANDOM = true; // Update when switching fuzzing method
+        static final boolean RANDOM = false; // Update when switching fuzzing method
 
         static void initialize(String[] inputSymbols) {
                 // Initialise a random trace from the input symbols of the problem.
@@ -37,10 +37,8 @@ public class FuzzingLab {
                 double raw = rawBranchDistance(condition, value);
                 // System.out.println("Raw Branch Distance: "+raw);
                 double normalizedDistance = normalize(raw);
-                if (!localBranches.contains(line_nr)) {
-                        localBranches.add(line_nr);
-                        visitedBranches.add(line_nr);
-                }
+                // localBranches.add(line_nr);
+                visitedBranches.add(line_nr);
                 latestBranchDistances.put(line_nr, normalizedDistance);
                 // if (normalizedDistance > 0.0) {
                 // System.out.println("Branch at line " + line_nr + ": " + condition.toString()
@@ -51,7 +49,6 @@ public class FuzzingLab {
         }
 
         static double normalize(double distance) {
-
                 return distance / (distance + 1.0);
         }
 
@@ -196,7 +193,7 @@ public class FuzzingLab {
          */
         static double calculateFitness(List<String> trace) {
                 latestBranchDistances.clear();
-                localBranches.clear();
+                // localBranches.clear();
                 sawInvalid = false;
                 // discoveredErrorCodes.clear();
                 try {
@@ -217,8 +214,8 @@ public class FuzzingLab {
                 return fitness;
         }
 
-        static List<String> mutateTrace(List<String> trace, String[] inputSymbols) {
-                List<String> mutated = new ArrayList<>(trace);
+        static List<String> mutateTrace(String[] inputSymbols) {
+                List<String> mutated = new ArrayList<>(Arrays.asList(inputSymbols));
                 int mutationType = r.nextInt(4);
                 switch (mutationType) {
                         case 0:
@@ -259,12 +256,10 @@ public class FuzzingLab {
         }
 
         static List<String> hillClimbing(String[] inputSymbols) {
-                // List<String> bestTrace = new ArrayList<>(currentTrace);
-                // double bestFitness = calculateFitness(bestTrace);
-                // System.out.println("Best Trace Obtained: " + bestTrace);
-                List<String> bestTrace = null;
+                List<String> bestTrace = new ArrayList<>(currentTrace);
                 double bestFitness = Double.POSITIVE_INFINITY;
                 final int MAX_TRIES = 20;
+                // TODO: check whether below is necessary
                 for (int t = 0; t < MAX_TRIES; t++) {
                         List<String> cand = generateRandomTrace(inputSymbols);
                         double fit = calculateFitness(cand);
@@ -274,6 +269,7 @@ public class FuzzingLab {
                                 break;
                         }
                 }
+                // TODO: check whether below is necessary
                 if (bestTrace == null) {
                         String good = inputSymbols[0];
                         for (String s : inputSymbols) {
@@ -292,13 +288,14 @@ public class FuzzingLab {
 
                 boolean improved = false;
                 for (int i = 0; i < MUTATIONS_PER_ITERATION; i++) {
-                        System.out.println("Mutating Trace");
-                        List<String> mutatedTrace = mutateTrace(bestTrace, inputSymbols);
-                        System.out.println("Input Symbols: "+ inputSymbols);
-                        System.out.println("Mutated Trace" + mutatedTrace);
+                        // System.out.println("Mutating Trace");
+                        List<String> mutatedTrace = mutateTrace(inputSymbols);
+                        // System.out.println("Input Symbols: "+ Arrays.asList(inputSymbols));
+                        // System.out.println("Mutated Trace" + mutatedTrace);
+                        // System.out.println("Best trace: " + bestTrace);
                         double mutatedFitness = calculateFitness(mutatedTrace);
-                        System.out.println("Mutated Fitness: " + mutatedFitness);
-                        System.out.println("Best Fitness: " + bestFitness);
+                        // System.out.println("Mutated Fitness: " + mutatedFitness);
+                        // System.out.println("Best Fitness: " + bestFitness);
                         if (Double.isInfinite(mutatedFitness)) {
                                 continue;
                         }
@@ -315,7 +312,6 @@ public class FuzzingLab {
                         bestTrace = generateRandomTrace(inputSymbols);
                 }
                 return bestTrace;
-
         }
 
         static List<String> fuzz(String[] inputSymbols) {
@@ -326,6 +322,7 @@ public class FuzzingLab {
                  * using the given input symbols. Please change it to your own code.
                  */
                 if (RANDOM) {
+                        // TODO: Random fuzzing doesn't work with current implementation
                         return generateRandomTrace(inputSymbols);
                 }
 
@@ -361,12 +358,10 @@ public class FuzzingLab {
                 System.out.println("Starting fuzzing with hill climbing...");
                 while (System.currentTimeMillis() < deadline) {
                         System.out.printf("Time left: %d ms\n", (deadline - System.currentTimeMillis()));
-
-                        // DistanceTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
+                        previousBranchCount = visitedBranches.size();
 
                         try {
                                 currentTrace = fuzz(DistanceTracker.inputSymbols);
-                                DistanceTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
                         } catch (SecurityException se) {
                                 discoveredErrorCodes.add(se.getMessage());
                                 // System.out.println(se.getMessage());
@@ -379,7 +374,7 @@ public class FuzzingLab {
 
                         System.out.printf("Covered %d branches, found %d error codes\n",
                                         visitedBranches.size(), discoveredErrorCodes.size());
-                        previousBranchCount = visitedBranches.size();
+                        
                         if (visitedBranches.size() <= previousBranchCount) {
                                 noImprovementCounter++;
                         } else {
@@ -402,12 +397,6 @@ public class FuzzingLab {
          * @param out the string that has been outputted in the standard out.
          */
         public static void output(String out) {
-                // System.out.println(out);
-                // if (out.startsWith("Invalid input:")) {
-                // discoveredErrorCodes.add(out);
-                // return;
-                // }
-                
                 if (out.contains("error_") || out.contains("Error")) {
                         String error_code = out.replaceFirst("^Invalid input:\\s*", "");
                         System.out.println("Added Error Code: " + error_code);
