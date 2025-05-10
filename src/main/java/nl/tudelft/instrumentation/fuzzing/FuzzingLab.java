@@ -25,7 +25,7 @@ public class FuzzingLab {
         static final int TIME_BUDGET_MS = 5 * 60 * 1000;
         static final double RESTART_PROBABILITY = 0.1;
         static final double K = 0.1;
-        static final boolean RANDOM = false; // Update when switching fuzzing method
+        static final boolean RANDOM = true; // Update when switching fuzzing method
 
         static void initialize(String[] inputSymbols) {
                 // Initialise a random trace from the input symbols of the problem.
@@ -42,12 +42,6 @@ public class FuzzingLab {
                 visitedBranches.add(line_nr);
                 latestBranchDistances.put(line_nr, normalizedDistance);
                 lastExecutionPath.add(line_nr);
-                // if (normalizedDistance > 0.0) {
-                // System.out.println("Branch at line " + line_nr + ": " + condition.toString()
-                // +
-                // " evaluated as " + value + " with distance " + normalizedDistance);
-                // }
-                // System.out.println(condition.toString());
         }
 
         static double normalize(double distance) {
@@ -231,8 +225,7 @@ public class FuzzingLab {
                 switch (mutationType) {
                         case 0:
                                 if (mutated.size() > 0) {
-                                        int index = r.nextInt(mutated.size());
-                                        mutated.set(index, mutated.get(r.nextInt(mutated.size())));
+                                        mutated.set(r.nextInt(mutated.size()), mutated.get(r.nextInt(mutated.size())));
                                 }
                                 break;
                         case 1:
@@ -304,13 +297,6 @@ public class FuzzingLab {
                 long deadline = System.currentTimeMillis() + TIME_BUDGET_MS;
                 List<String> bestTrace = null;
                 while (System.currentTimeMillis() < deadline) {
-                        // Update target branch to help search
-                        OptionalInt target = visitedBranches.stream()
-                                .sorted()
-                                .filter(line -> !latestBranchDistances.containsKey(line))
-                                .mapToInt(Integer::intValue).findFirst();
-                        targetBranchLine = target.isPresent() ? target.getAsInt() : -1;
-
                         currentTrace = fuzz(DistanceTracker.inputSymbols);
                         double fitness = calculateFitness(currentTrace);
                         if (fitness < currentFitness) {
@@ -346,7 +332,8 @@ public class FuzzingLab {
 
                         // Avoid comma issues
                         String errorCodesJoined = discoveredErrorCodes.stream()
-                                .map(code -> code.replaceAll(",", ";").trim()) 
+                                .map(code -> code.replaceAll(".*?(\\d+)", "$1"))  // Extract numeric part
+                                .sorted(Comparator.comparingInt(Integer::parseInt))
                                 .collect(Collectors.joining("|"));
                         
                         writer.write(visitedBranches.size() + ","
