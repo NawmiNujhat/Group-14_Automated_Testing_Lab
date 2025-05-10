@@ -52,9 +52,7 @@ public class FuzzingLab {
                 
                 double raw = rawBranchDistance(condition, value);
                 double normalizedDistance = normalize(raw);
-                visitedBranches.add(line_nr);
-                latestBranchDistances.put(line_nr, normalizedDistance);
-                lastExecutionPath.add(line_nr);
+                
                 int idToken = edgeId(line_nr, value); // edge we just took
                 visitedBranches.add(idToken);
                 latestBranchDistances.put(idToken, normalizedDistance);
@@ -219,7 +217,6 @@ public class FuzzingLab {
                 lastExecutionPath.clear();
                 lastExecutionPath.clear();
                 sawInvalid = false;
-                branchCount=0;
 
                 try {
                         DistanceTracker.runNextFuzzedSequence(trace.toArray(new String[0]));
@@ -227,7 +224,6 @@ public class FuzzingLab {
                         sawInvalid = true;
                 } catch (IllegalStateException ise) {
                         discoveredErrorCodes.add(ise.getMessage());
-                        return 0.0;
                 } catch (Throwable t) {
                         t.printStackTrace();
                 }
