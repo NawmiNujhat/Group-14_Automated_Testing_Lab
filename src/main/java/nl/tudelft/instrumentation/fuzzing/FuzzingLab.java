@@ -1,6 +1,8 @@
 package nl.tudelft.instrumentation.fuzzing;
 
 import java.util.*;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -11,8 +13,11 @@ import java.io.IOException;
 public class FuzzingLab {
         static Random r = new Random();
         static List<String> currentTrace;
+        static double temperature = 5.0;
+        static final double COOL_RATE = 0.98;
         static double currentFitness = Double.POSITIVE_INFINITY;
-        static int traceLength = 10;
+        static int traceLength = 20;
+        static int maxTraceLength = 50;
         static boolean isFinished = false;
         static boolean sawInvalid = false;
         static Map<Integer, Double> latestBranchDistances = new HashMap<>();
@@ -30,6 +35,9 @@ public class FuzzingLab {
         static final double K = 0.1; // Update when switching fuzzing method
         static final boolean RANDOM = false; // Update when switching fuzzing method
         static Set<Integer> allBranches = new HashSet<>();
+        static int noImprove = 0;
+        static boolean recordCoverage = true;
+        static Set<Integer> currentTraceCoverage = null;
 
         static void initialize(String[] inputSymbols) {
                 // Initialise a random trace from the input symbols of the problem.
@@ -46,20 +54,27 @@ public class FuzzingLab {
 
         static void encounteredNewBranch(MyVar condition, boolean value, int line_nr) {
                 // if (++branchCount > MAX_BRANCHES_PER_RUN) {
-                //         throw new SecurityException(
-                //             "Exceeded " + MAX_BRANCHES_PER_RUN + " branches in one run");
-                //     }
-                
+                // throw new SecurityException(
+                // "Exceeded " + MAX_BRANCHES_PER_RUN + " branches in one run");
+                // }
+
                 double raw = rawBranchDistance(condition, value);
                 double normalizedDistance = normalize(raw);
-                
+
                 int idToken = edgeId(line_nr, value); // edge we just took
-                visitedBranches.add(idToken);
+                int other = edgeId(line_nr, !value);
+
+                if (recordCoverage) {
+                        visitedBranches.add(idToken);
+                }
+                if (currentTraceCoverage != null) {
+                        currentTraceCoverage.add(idToken);
+                    }
                 latestBranchDistances.put(idToken, normalizedDistance);
-                lastExecutionPath.add(idToken);
-                // add *both* possible outcomes to the universe of edges
+                latestBranchDistances.putIfAbsent(other, 1 - normalizedDistance);
+                // lastExecutionPath.add(idToken);
+                allBranches.add(other);
                 allBranches.add(edgeId(line_nr, value));
-                allBranches.add(edgeId(line_nr, !value));
 
                 // if (normalizedDistance > 0.0) {
                 // System.out.println("Branch at line " + line_nr + ": " + condition.toString()
@@ -215,37 +230,52 @@ public class FuzzingLab {
         static double calculateFitness(List<String> trace) {
                 latestBranchDistances.clear();
                 lastExecutionPath.clear();
-                lastExecutionPath.clear();
                 sawInvalid = false;
 
                 try {
                         DistanceTracker.runNextFuzzedSequence(trace.toArray(new String[0]));
-                } catch (SecurityException se) {
+                } catch (SecurityException | CancellationException te) {
                         sawInvalid = true;
                 } catch (IllegalStateException ise) {
                         discoveredErrorCodes.add(ise.getMessage());
                 } catch (Throwable t) {
-                        t.printStackTrace();
+                        if (t instanceof TimeoutException) {
+                                return 1000 + trace.size() * 10;
+                        } else {
+                                t.printStackTrace();
+                        }
                 }
 
                 if (sawInvalid) {
                         return Double.POSITIVE_INFINITY;
                 }
-                double branchDistance;
-                if (targetBranchLine == -1) { 
-                        branchDistance = 0.0;
-                } else if (latestBranchDistances.containsKey(targetBranchLine)) {
-                        branchDistance = latestBranchDistances.get(targetBranchLine); 
-                } else if (!lastExecutionPath.isEmpty()) {
-                        int diverging = lastExecutionPath.get(lastExecutionPath.size() - 1);
-                        branchDistance = latestBranchDistances.getOrDefault(diverging, 1.0);
-                } else {
-                        branchDistance = 1.0; 
+                // double branchDistance;
+                // if (targetBranchLine == -1) {
+                // branchDistance = 0.0;
+                // }
+                // else if (latestBranchDistances.containsKey(targetBranchLine)) {
+                // branchDistance = latestBranchDistances.get(targetBranchLine);
+                // } else if (!lastExecutionPath.isEmpty()) {
+                // int diverging = lastExecutionPath.get(lastExecutionPath.size() - 1);
+                // branchDistance = latestBranchDistances.getOrDefault(diverging, 1.0);
+                // } else {
+                // branchDistance = 1.0;
+                // }
+                double branchDistance = 1.0;
+                if (targetBranchLine != -1) {
+                        branchDistance = latestBranchDistances.getOrDefault(targetBranchLine, 1.0);
                 }
+                // double branchDistance = 0.0;
+                // for (int edge : allBranches) {
+                // if (!visitedBranches.contains(edge)) {
+                // // if we've seen a distance for that edge, use it, else 1.0
+                // branchDistance += latestBranchDistances.getOrDefault(edge, 1.0);
+                // }
+                // }
                 // System.out.println("Branch Distance: " + branchDistance);
                 int approachLevel = computeApproachLevel();
                 // System.out.println("Approach Level: " + approachLevel);
-                return approachLevel + branchDistance;
+                return branchDistance + approachLevel;
         }
 
         static int computeApproachLevel() {
@@ -259,25 +289,27 @@ public class FuzzingLab {
                 }
                 return index;
         }
+
         static List<String> mutateTrace(List<String> trace) {
                 List<String> mutated = new ArrayList<>(trace);
-                int mutationType = r.nextInt(4);
+                int mutationType = r.nextInt(6);
+                String[] symbols = DistanceTracker.inputSymbols;
                 switch (mutationType) {
                         case 0:
+                                int idx = r.nextInt(mutated.size());
                                 if (mutated.size() > 0) {
-                                        mutated.set(r.nextInt(mutated.size()), mutated.get(r.nextInt(mutated.size())));
                                         int index = r.nextInt(mutated.size());
-                                        mutated.set(index, mutated.get(r.nextInt(mutated.size())));
+                                        mutated.set(idx,
+                                                        DistanceTracker.inputSymbols[r
+                                                                        .nextInt(DistanceTracker.inputSymbols.length)]);
                                 }
                                 break;
                         case 1:
-                                mutated.add(mutated.get(r.nextInt(mutated.size())));
                                 mutated.add(DistanceTracker.inputSymbols[r
                                                 .nextInt(DistanceTracker.inputSymbols.length)]);
                                 break;
                         case 2:
                                 if (mutated.size() > 1) {
-                                        mutated.remove(r.nextInt(mutated.size()));
                                         mutated.remove(r.nextInt(mutated.size()));
                                 }
                                 break;
@@ -287,11 +319,27 @@ public class FuzzingLab {
                                         Collections.swap(mutated, i, j);
                                 }
                                 break;
+                        case 4: // brand-new mutation
+                                int pos = r.nextInt(mutated.size() + 1);
+                                String sym = DistanceTracker.inputSymbols[r.nextInt(symbols.length)];
+                                mutated.add(pos, sym);
+                                break;
+                        case 5: // delete‐and‐insert
+                                if (mutated.size() > 0)
+                                        mutated.remove(r.nextInt(mutated.size()));
+                                mutated.add(r.nextInt(mutated.size() + 1), symbols[r.nextInt(symbols.length)]);
+                                break;
+                        case 6: // shrink‐and‐grow
+                                if (!mutated.isEmpty())
+                                        mutated.remove(r.nextInt(mutated.size()));
+                                if (mutated.size() < maxTraceLength)
+                                        mutated.add(r.nextInt(mutated.size() + 1), symbols[r.nextInt(symbols.length)]);
+                                break;
 
                 }
                 if (mutated.isEmpty()) {
-                        mutated.add(mutated.get(r.nextInt(mutated.size())));
-                        mutated.add(mutated.get(r.nextInt(mutated.size())));
+                        mutated.add(mutated.get(r.nextInt(symbols.length)));
+                        mutated.add(mutated.get(r.nextInt(symbols.length)));
                 }
                 return mutated;
 
@@ -299,20 +347,27 @@ public class FuzzingLab {
 
         static List<String> hillClimbing(String[] inputSymbols) {
                 List<String> bestTrace = new ArrayList<>(currentTrace);
-                double bestFitness = currentFitness;
+                double bestFitness = calculateFitness(bestTrace);
                 for (int i = 0; i < MUTATIONS_PER_ITERATION; i++) {
                         List<String> mutatedTrace = mutateTrace(bestTrace);
                         double mutatedFitness = calculateFitness(mutatedTrace);
-                        if (Double.isFinite(mutatedFitness) && mutatedFitness <= bestFitness) {
+                        boolean accept = (mutatedFitness <= bestFitness);
+                        if (!accept) {
+                                double delta = bestFitness - mutatedFitness; // positive if cand is worse
+                                double p = Math.exp(delta / temperature);
+                                if (r.nextDouble() < p) {
+                                        accept = true;
+                                }
+                        }
+                        if (accept) {
                                 bestTrace = mutatedTrace;
                                 bestFitness = mutatedFitness;
                         }
                 }
+                temperature = Math.max(0.01, temperature * COOL_RATE);
                 return bestTrace;
 
         }
-                
-        
 
         static List<String> fuzz(String[] inputSymbols) {
                 /*
@@ -342,24 +397,65 @@ public class FuzzingLab {
         }
 
         static void run() {
-                initialize(DistanceTracker.inputSymbols);
+                visitedBranches.clear();
+                allBranches.clear();
+                latestBranchDistances.clear();
+                lastExecutionPath.clear();
+                discoveredErrorCodes.clear();
+                branchCount = 0;
+                currentFitness = Double.POSITIVE_INFINITY;
+                traceLength = 20;
+                temperature = 5.0;
                 long deadline = System.currentTimeMillis() + TIME_BUDGET_MS;
+                if (RANDOM) {
+                        // only one random trace, then exit
+                        initialize(DistanceTracker.inputSymbols);
+                        double fitness = 0.0;
+                        while (System.currentTimeMillis() < deadline) {
+                                currentTrace = fuzz(DistanceTracker.inputSymbols);
+                                recordCoverage=true;
+                                DistanceTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
+                                recordCoverage=false;
+                                System.out.printf("Random only covered %d branches\n", visitedBranches.size());
+
+                        }
+                        System.out.printf("Covered %d branches, fitness %.2f\n", visitedBranches.size(),
+                                        fitness);
+                        exportResultsToCSV(currentTrace);
+                        return;
+                }
+                initialize(DistanceTracker.inputSymbols);
                 List<String> bestTrace = null;
                 while (System.currentTimeMillis() < deadline) {
                         if (targetBranchLine == -1 || visitedBranches.contains(targetBranchLine)) {
                                 targetBranchLine = allBranches.stream()
                                                 .filter(id -> !visitedBranches.contains(id))
-                                                .sorted()
-                                                .findFirst()
+                                                .min(Comparator.comparingDouble(
+                                                                e -> latestBranchDistances.getOrDefault(e, 1.0)))
                                                 .orElse(-1);
+
                         }
 
                         currentTrace = fuzz(DistanceTracker.inputSymbols);
+                        recordCoverage=false;
                         double fitness = calculateFitness(currentTrace);
+                        recordCoverage=true;
                         // System.out.println("Fitness: " + currentFitness);
                         if (fitness <= currentFitness) {
                                 currentFitness = fitness;
                                 bestTrace = currentTrace;
+                                noImprove = 0;
+                        } else {
+                                noImprove++;
+                                // if we went a full batch with no gain, restart from scratch
+                                if (noImprove >= RESTART_THRESHOLD) {
+                                        noImprove = 0;
+                                        currentTrace = generateRandomTrace(DistanceTracker.inputSymbols);
+                                        currentFitness = calculateFitness(currentTrace);
+                                        traceLength = Math.min(maxTraceLength, traceLength + 1);
+                                        // reset temperature so we can explore again
+                                        temperature = 1.0;
+                                }
                         }
                         System.out.printf("Covered %d branches, fitness %.2f\n", visitedBranches.size(),
                                         currentFitness);
@@ -390,9 +486,9 @@ public class FuzzingLab {
 
                         // Avoid comma issues
                         String errorCodesJoined = discoveredErrorCodes.stream()
-                                .map(code -> code.replaceAll(".*?(\\d+)", "$1"))  // Extract numeric part
-                                .sorted(Comparator.comparingInt(Integer::parseInt))
-                                .collect(Collectors.joining("|"));
+                                        .map(code -> code.replaceAll(".*?(\\d+)", "$1")) // Extract numeric part
+                                        .sorted(Comparator.comparingInt(Integer::parseInt))
+                                        .collect(Collectors.joining("|"));
 
                         writer.write(visitedBranches.size() + ","
                                         + discoveredErrorCodes.size() + ","
