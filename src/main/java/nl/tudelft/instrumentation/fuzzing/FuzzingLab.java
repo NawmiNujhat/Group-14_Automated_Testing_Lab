@@ -31,9 +31,9 @@ public class FuzzingLab {
         static final int MUTATIONS_PER_ITERATION = 20;
         static final int RESTART_THRESHOLD = MUTATIONS_PER_ITERATION;
         static final int TIME_BUDGET_MS = 5 * 60 * 1000;
-        static final double RESTART_PROBABILITY = 0.5;
+        static final double RESTART_PROBABILITY = 0.0;
         static final double K = 0.1; // Update when switching fuzzing method
-        static final boolean RANDOM = false; // Update when switching fuzzing method
+        static final boolean RANDOM = true; // Update when switching fuzzing method
         static Set<Integer> allBranches = new HashSet<>();
         static int noImprove = 0;
         static boolean recordCoverage = true;
