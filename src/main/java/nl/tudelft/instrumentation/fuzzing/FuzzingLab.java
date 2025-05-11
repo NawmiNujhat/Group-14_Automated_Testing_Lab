@@ -59,12 +59,12 @@ public class FuzzingLab {
                 // "Exceeded " + MAX_BRANCHES_PER_RUN + " branches in one run");
                 // }
 
-                double raw = rawBranchDistance(condition, !value);
+                double raw = rawBranchDistance(condition, value);
                 double normalizedDistance = normalize(raw);
                 sumBranchDistance += normalizedDistance;
 
-                int idToken = edgeId(line_nr, !value); // edge we just took
-                int other = edgeId(line_nr, value);
+                int idToken = edgeId(line_nr, value); // edge we just took
+                int other = edgeId(line_nr, !value);
                 visitedBranches.add(idToken);
 
                 latestBranchDistances.put(idToken, normalizedDistance);
@@ -407,10 +407,10 @@ public class FuzzingLab {
                 double cur=Double.POSITIVE_INFINITY;
                 double fitness = 0.0;
                 if (RANDOM) {
-                        // only one random trace, then exit
+                        initialize(DistanceTracker.inputSymbols);
                         while (System.currentTimeMillis() < deadline) {
                                 visitedBranches.clear();
-                                initialize(DistanceTracker.inputSymbols);
+                                discoveredErrorCodes.clear();
                                 currentTrace = fuzz(DistanceTracker.inputSymbols);
                                 try {
                                         fitness=calculateFitness(currentTrace);
@@ -425,7 +425,7 @@ public class FuzzingLab {
                                         throw t;
                                 }
                                 int cov = visitedBranches.size();
-                                if (cov > bestCov && fitness<=cur) {
+                                if (cov > bestCov) {
                                         bestCov = cov;
                                         bestTrace = new ArrayList<>(currentTrace);
                                 }
