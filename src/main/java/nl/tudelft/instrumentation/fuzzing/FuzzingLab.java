@@ -31,7 +31,7 @@ public class FuzzingLab {
         static final int MUTATIONS_PER_ITERATION = 20;
         static final int RESTART_THRESHOLD = MUTATIONS_PER_ITERATION;
         static final int TIME_BUDGET_MS = 5 * 60 * 1000;
-        static final double RESTART_PROBABILITY = 0.0;
+        static final double RESTART_PROBABILITY = 0.05;
         static final double K = 0.1; // Update when switching fuzzing method
         static final boolean RANDOM = true; // Update when switching fuzzing method
         static Set<Integer> allBranches = new HashSet<>();
@@ -58,21 +58,16 @@ public class FuzzingLab {
                 // "Exceeded " + MAX_BRANCHES_PER_RUN + " branches in one run");
                 // }
 
-                double raw = rawBranchDistance(condition, value);
+                double raw = rawBranchDistance(condition, !value);
                 double normalizedDistance = normalize(raw);
 
-                int idToken = edgeId(line_nr, value); // edge we just took
-                int other = edgeId(line_nr, !value);
+                int idToken = edgeId(line_nr, !value); // edge we just took
+                int other = edgeId(line_nr, value);
+                visitedBranches.add(idToken);
 
-                if (recordCoverage) {
-                        visitedBranches.add(idToken);
-                }
-                if (currentTraceCoverage != null) {
-                        currentTraceCoverage.add(idToken);
-                    }
                 latestBranchDistances.put(idToken, normalizedDistance);
                 latestBranchDistances.putIfAbsent(other, 1 - normalizedDistance);
-                // lastExecutionPath.add(idToken);
+                lastExecutionPath.add(idToken);
                 allBranches.add(other);
                 allBranches.add(edgeId(line_nr, value));
 
@@ -240,7 +235,7 @@ public class FuzzingLab {
                         discoveredErrorCodes.add(ise.getMessage());
                 } catch (Throwable t) {
                         if (t instanceof TimeoutException) {
-                                return 1000 + trace.size() * 10;
+                                return Double.POSITIVE_INFINITY;
                         } else {
                                 t.printStackTrace();
                         }
@@ -261,10 +256,10 @@ public class FuzzingLab {
                 // } else {
                 // branchDistance = 1.0;
                 // }
-                double branchDistance = 1.0;
-                if (targetBranchLine != -1) {
-                        branchDistance = latestBranchDistances.getOrDefault(targetBranchLine, 1.0);
-                }
+                // double branchDistance = 1.0;
+                // if (targetBranchLine != -1) {
+                // branchDistance = latestBranchDistances.getOrDefault(targetBranchLine, 1.0);
+                // }
                 // double branchDistance = 0.0;
                 // for (int edge : allBranches) {
                 // if (!visitedBranches.contains(edge)) {
@@ -273,6 +268,10 @@ public class FuzzingLab {
                 // }
                 // }
                 // System.out.println("Branch Distance: " + branchDistance);
+                double branchDistance = allBranches.stream()
+                                .filter(e -> !visitedBranches.contains(e))
+                                .mapToDouble(e -> latestBranchDistances.getOrDefault(e, 1.0))
+                                .sum();
                 int approachLevel = computeApproachLevel();
                 // System.out.println("Approach Level: " + approachLevel);
                 return branchDistance + approachLevel;
@@ -292,7 +291,7 @@ public class FuzzingLab {
 
         static List<String> mutateTrace(List<String> trace) {
                 List<String> mutated = new ArrayList<>(trace);
-                int mutationType = r.nextInt(6);
+                int mutationType = r.nextInt(7);
                 String[] symbols = DistanceTracker.inputSymbols;
                 switch (mutationType) {
                         case 0:
@@ -413,9 +412,9 @@ public class FuzzingLab {
                         double fitness = 0.0;
                         while (System.currentTimeMillis() < deadline) {
                                 currentTrace = fuzz(DistanceTracker.inputSymbols);
-                                recordCoverage=true;
+                                // recordCoverage=true;
                                 DistanceTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
-                                recordCoverage=false;
+                                recordCoverage = true;
                                 System.out.printf("Random only covered %d branches\n", visitedBranches.size());
 
                         }
@@ -437,9 +436,9 @@ public class FuzzingLab {
                         }
 
                         currentTrace = fuzz(DistanceTracker.inputSymbols);
-                        recordCoverage=false;
+                        // recordCoverage = false;
                         double fitness = calculateFitness(currentTrace);
-                        recordCoverage=true;
+                        // recordCoverage = true;
                         // System.out.println("Fitness: " + currentFitness);
                         if (fitness <= currentFitness) {
                                 currentFitness = fitness;
