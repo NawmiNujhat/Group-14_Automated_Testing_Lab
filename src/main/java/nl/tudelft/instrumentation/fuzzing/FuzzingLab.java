@@ -14,7 +14,6 @@ public class FuzzingLab {
         static Random r = new Random();
         static List<String> currentTrace;
         static double temperature = 5.0;
-        static final double COOL_RATE = 0.98;
         static double currentFitness = Double.POSITIVE_INFINITY;
         static int traceLength = 20;
         static int maxTraceLength = 50;
@@ -24,22 +23,23 @@ public class FuzzingLab {
         static Set<Integer> visitedBranches = new HashSet<>();
         static Set<String> discoveredErrorCodes = new HashSet<>();
         static List<Integer> lastExecutionPath = new ArrayList<>();
-        static int targetBranchLine = -1;
-        static final int MAX_BRANCHES_PER_RUN = 10_000;
-        static int branchCount;
-        static double sumBranchDistance = 0.0;
-
-        static final int MUTATIONS_PER_ITERATION = 20;
-        static final int RESTART_THRESHOLD = MUTATIONS_PER_ITERATION;
-        static final int TIME_BUDGET_MS = 5 * 60 * 1000;
-        static final double RESTART_PROBABILITY = 0.05;
-        static final double K = 0.1; 
-        static final boolean RANDOM = true; // Update when switching fuzzing method
         static Set<Integer> allBranches = new HashSet<>();
         static int noImprove = 0;
         static boolean recordCoverage = true;
         static Set<Integer> currentTraceCoverage = null;
+        static int targetBranchLine = -1;
+        static int branchCount = 0;
+        static double sumBranchDistance = 0.0;
 
+        static final double COOL_RATE = 0.98;
+        static final int MAX_BRANCHES_PER_RUN = 10_000;
+        static final int MUTATIONS_PER_ITERATION = 20;
+        static final int RESTART_THRESHOLD = MUTATIONS_PER_ITERATION;
+        static final int TIME_BUDGET_MS = 5 * 60 * 1000;
+        static final double RESTART_PROBABILITY = 0.05;
+        static final double K = 0.1; // Update when switching fuzzing method
+        static final boolean RANDOM = false; // Update when switching fuzzing method
+        
         static void initialize(String[] inputSymbols) {
                 // Initialise a random trace from the input symbols of the problem.
                 currentTrace = generateRandomTrace(inputSymbols);
@@ -54,11 +54,6 @@ public class FuzzingLab {
         }
 
         static void encounteredNewBranch(MyVar condition, boolean value, int line_nr) {
-                // if (++branchCount > MAX_BRANCHES_PER_RUN) {
-                // throw new SecurityException(
-                // "Exceeded " + MAX_BRANCHES_PER_RUN + " branches in one run");
-                // }
-
                 double raw = rawBranchDistance(condition, !value);
                 double normalizedDistance = normalize(raw);
                 sumBranchDistance += normalizedDistance;
@@ -239,6 +234,7 @@ public class FuzzingLab {
                 if (sawInvalid) {
                         return Double.POSITIVE_INFINITY;
                 }
+
                 double branchDistance = allBranches.stream()
                                 .filter(e -> !visitedBranches.contains(e))
                                 .mapToDouble(e -> latestBranchDistances.getOrDefault(e, 1.0))
@@ -268,10 +264,8 @@ public class FuzzingLab {
                 String[] symbols = DistanceTracker.inputSymbols;
                 switch (mutationType) {
                         case 0:
-                                int idx = r.nextInt(mutated.size());
                                 if (mutated.size() > 0) {
-                                        int index = r.nextInt(mutated.size());
-                                        mutated.set(idx,
+                                        mutated.set(r.nextInt(mutated.size()),
                                                         DistanceTracker.inputSymbols[r
                                                                         .nextInt(DistanceTracker.inputSymbols.length)]);
                                 }
@@ -372,7 +366,6 @@ public class FuzzingLab {
                 int bestCov = 0;
                 long deadline = System.currentTimeMillis() + TIME_BUDGET_MS;
                 List<String> bestTrace = null;
-                double cur=Double.POSITIVE_INFINITY;
                 double fitness = 0.0;
                 if (RANDOM) {
                         initialize(DistanceTracker.inputSymbols);
