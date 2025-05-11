@@ -27,6 +27,7 @@ public class FuzzingLab {
         static int targetBranchLine = -1;
         static final int MAX_BRANCHES_PER_RUN = 10_000;
         static int branchCount;
+        static double sumBranchDistance = 0.0;
 
         static final int MUTATIONS_PER_ITERATION = 20;
         static final int RESTART_THRESHOLD = MUTATIONS_PER_ITERATION;
@@ -60,6 +61,7 @@ public class FuzzingLab {
 
                 double raw = rawBranchDistance(condition, !value);
                 double normalizedDistance = normalize(raw);
+                sumBranchDistance += normalizedDistance;
 
                 int idToken = edgeId(line_nr, !value); // edge we just took
                 int other = edgeId(line_nr, value);
@@ -69,7 +71,7 @@ public class FuzzingLab {
                 latestBranchDistances.putIfAbsent(other, 1 - normalizedDistance);
                 lastExecutionPath.add(idToken);
                 allBranches.add(other);
-                allBranches.add(edgeId(line_nr, value));
+                allBranches.add(edgeId(line_nr, !value));
 
                 // if (normalizedDistance > 0.0) {
                 // System.out.println("Branch at line " + line_nr + ": " + condition.toString()
@@ -273,6 +275,9 @@ public class FuzzingLab {
                                 .mapToDouble(e -> latestBranchDistances.getOrDefault(e, 1.0))
                                 .sum();
                 int approachLevel = computeApproachLevel();
+                if (RANDOM) {
+                        return branchDistance;
+                }
                 // System.out.println("Approach Level: " + approachLevel);
                 return branchDistance + approachLevel;
         }
@@ -396,35 +401,41 @@ public class FuzzingLab {
         }
 
         static void run() {
-                visitedBranches.clear();
-                allBranches.clear();
-                latestBranchDistances.clear();
-                lastExecutionPath.clear();
-                discoveredErrorCodes.clear();
-                branchCount = 0;
-                currentFitness = Double.POSITIVE_INFINITY;
-                traceLength = 20;
-                temperature = 5.0;
+                int bestCov = 0;
                 long deadline = System.currentTimeMillis() + TIME_BUDGET_MS;
+                List<String> bestTrace = null;
+                double cur=Double.POSITIVE_INFINITY;
+                double fitness = 0.0;
                 if (RANDOM) {
                         // only one random trace, then exit
-                        initialize(DistanceTracker.inputSymbols);
-                        double fitness = 0.0;
                         while (System.currentTimeMillis() < deadline) {
+                                visitedBranches.clear();
+                                initialize(DistanceTracker.inputSymbols);
                                 currentTrace = fuzz(DistanceTracker.inputSymbols);
-                                // recordCoverage=true;
-                                DistanceTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
-                                recordCoverage = true;
+                                try {
+                                        fitness=calculateFitness(currentTrace);
+                                } catch (CancellationException e) {
+                                        continue;
+                                } catch (SecurityException | IllegalStateException e) {
+                                        continue;
+                                } catch (Throwable t) {
+                                        if (t instanceof java.util.concurrent.TimeoutException) {
+                                                continue;
+                                        }
+                                        throw t;
+                                }
+                                int cov = visitedBranches.size();
+                                if (cov > bestCov && fitness<=cur) {
+                                        bestCov = cov;
+                                        bestTrace = new ArrayList<>(currentTrace);
+                                }
                                 System.out.printf("Random only covered %d branches\n", visitedBranches.size());
-
                         }
-                        System.out.printf("Covered %d branches, fitness %.2f\n", visitedBranches.size(),
-                                        fitness);
-                        exportResultsToCSV(currentTrace);
+                        exportResultsToCSV(bestTrace);
                         return;
+
                 }
                 initialize(DistanceTracker.inputSymbols);
-                List<String> bestTrace = null;
                 while (System.currentTimeMillis() < deadline) {
                         if (targetBranchLine == -1 || visitedBranches.contains(targetBranchLine)) {
                                 targetBranchLine = allBranches.stream()
@@ -436,10 +447,7 @@ public class FuzzingLab {
                         }
 
                         currentTrace = fuzz(DistanceTracker.inputSymbols);
-                        // recordCoverage = false;
-                        double fitness = calculateFitness(currentTrace);
-                        // recordCoverage = true;
-                        // System.out.println("Fitness: " + currentFitness);
+                        fitness = calculateFitness(currentTrace);
                         if (fitness <= currentFitness) {
                                 currentFitness = fitness;
                                 bestTrace = currentTrace;
@@ -452,7 +460,6 @@ public class FuzzingLab {
                                         currentTrace = generateRandomTrace(DistanceTracker.inputSymbols);
                                         currentFitness = calculateFitness(currentTrace);
                                         traceLength = Math.min(maxTraceLength, traceLength + 1);
-                                        // reset temperature so we can explore again
                                         temperature = 1.0;
                                 }
                         }
