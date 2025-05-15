@@ -73,11 +73,8 @@ public class ConcolicExecutionLab {
             case "||":
                 return new MyVar(PathTracker.ctx.mkOr(left_var, right_var));
             default:
-                System.out.println("Unknown operator");
-                break;
+                throw new IllegalArgumentException("Unknown operator: " + operator);
         }
-
-        return new MyVar(PathTracker.ctx.mkFalse());
     }
 
     static MyVar createIntExpr(IntExpr var, String operator){
@@ -91,10 +88,32 @@ public class ConcolicExecutionLab {
 
     static MyVar createIntExpr(IntExpr left_var, IntExpr right_var, String operator){
         // Handle the following binary operators for numerical operations: +, -, /, *, %, ^, ==, <=, <, >= and >
-        if(operator.equals("+") || operator.equals("-") || operator.equals("/") || operator.equals("*") || operator.equals("%") || operator.equals("^"))
-            return new MyVar(PathTracker.ctx.mkInt(0));
-        return new MyVar(PathTracker.ctx.mkFalse());
-        // TODO: 
+        switch (operator) {
+            case "+":
+                return new MyVar(PathTracker.ctx.mkAdd(left_var, right_var));
+            case "-":
+                return new MyVar(PathTracker.ctx.mkSub(left_var, right_var));
+            case "/":
+                return new MyVar(PathTracker.ctx.mkDiv(left_var, right_var));
+            case "*":
+                return new MyVar(PathTracker.ctx.mkMul(left_var, right_var));
+            case "%":
+                return new MyVar(PathTracker.ctx.mkMod(left_var, right_var));
+            case "^":
+                return new MyVar(PathTracker.ctx.mkPower(left_var, right_var));
+            case "==":
+                return new MyVar(PathTracker.ctx.mkEq(left_var, right_var));
+            case "<=":
+                return new MyVar(PathTracker.ctx.mkLe(left_var, right_var));
+            case "<":
+                return new MyVar(PathTracker.ctx.mkLt(left_var, right_var));
+            case ">=":
+                return new MyVar(PathTracker.ctx.mkGe(left_var, right_var));
+            case ">":
+                return new MyVar(PathTracker.ctx.mkGt(left_var, right_var));
+            default:
+                throw new IllegalArgumentException("Unknown operator: " + operator);
+        }
     }
 
     static MyVar createStringExpr(SeqExpr left_var, SeqExpr right_var, String operator){
