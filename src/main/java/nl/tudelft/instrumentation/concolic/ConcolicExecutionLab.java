@@ -18,6 +18,7 @@ public class ConcolicExecutionLab {
     static Boolean isFinished = false;
     static List<String> currentTrace;
     static int traceLength = 10;
+    static Set<String> discoveredErrorCodes = new HashSet<>();
 
     static void initialize(String[] inputSymbols){
         // Initialise a random trace from the input symbols of the problem.
@@ -118,13 +119,18 @@ public class ConcolicExecutionLab {
 
     static MyVar createStringExpr(SeqExpr left_var, SeqExpr right_var, String operator){
         // We only support String.equals
-        return new MyVar(PathTracker.ctx.mkFalse());
-        // TODO: 
+        if (operator.equals("==")) {
+            return new MyVar(PathTracker.ctx.mkEq(left_var, right_var));
+        }
+        throw new IllegalArgumentException("Unknown operator: " + operator);
     }
 
     static void assign(MyVar var, String name, Expr value, Sort s){
         // All variable assignments, use single static assignment
-        // TODO: 
+        Context c = PathTracker.ctx;
+        // Set MyVar's z3var in same way as createVar function
+        var.z3var = c.mkConst(c.mkSymbol(name + "_" + PathTracker.z3counter++), s);
+        PathTracker.addToModel(c.mkEq(var.z3var, value));
     }
 
     static void encounteredNewBranch(MyVar condition, boolean value, int line_nr){
@@ -139,8 +145,7 @@ public class ConcolicExecutionLab {
                 .map(s -> s.replaceAll("\"", ""))
                 .collect(Collectors.toList());
 
-        // TODO: 
-
+        // TODO: store trimmed_new_inputs somewhere
     }
 
     /**
@@ -178,6 +183,7 @@ public class ConcolicExecutionLab {
         // Place here your code to guide your fuzzer with its search using Concolic Execution.
         while(!isFinished) {
             // Do things!
+            // TODO: concolic fuzzer implementation
             try {
                 System.out.println("Woohoo, looping!");
                 Thread.sleep(1000);
@@ -189,6 +195,10 @@ public class ConcolicExecutionLab {
 
     public static void output(String out){
         System.out.println(out);
+        if (out.contains("error_") || out.contains("Error")) {
+            String error_code = out.replaceFirst("^Invalid input:\\s*", "");
+            discoveredErrorCodes.add(error_code.trim());
+        }
     }
 
 }
