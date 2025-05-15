@@ -3,6 +3,8 @@ package nl.tudelft.instrumentation.concolic;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import javax.naming.Context;
+
 import com.microsoft.z3.*;
 
 /**
@@ -20,7 +22,10 @@ public class ConcolicExecutionLab {
     static void initialize(String[] inputSymbols){
         // Initialise a random trace from the input symbols of the problem.
         currentTrace = generateRandomTrace(inputSymbols);
+        // TODO: initialize needed variables
+        // TODO: Create Nodes?
     }
+    
 
     static MyVar createVar(String name, Expr value, Sort s){
         Context c = PathTracker.ctx;
@@ -39,8 +44,8 @@ public class ConcolicExecutionLab {
         // Create an input var, these should be free variables!
         Context c = PathTracker.ctx;
 
-        Expr z3var = c.mkString(""); // change this line to the correct code for creating a z3var.
-        
+        Expr z3var = c.mkConst(c.mkSymbol(name + "_" + PathTracker.z3counter++), s); // creating z3var, from createVar function above
+        MyVar inputVariable = new MyVar(z3var);
         // The following code is to add an additional constraint on the input variable.
         // The input variable must have a value that is equal to one of the input symbols.
         BoolExpr constraint = c.mkFalse();
@@ -49,25 +54,28 @@ public class ConcolicExecutionLab {
         }
 
         PathTracker.addToModel(constraint);
-
-        return new MyVar(PathTracker.ctx.mkString(""));
+        // TODO: check if input needs to be stored anywhere
+        return inputVariable;
     }
 
     static MyVar createBoolExpr(BoolExpr var, String operator){
         // Handle the following unary operators: !
-        return new MyVar(PathTracker.ctx.mkFalse());
+        return new MyVar(PathTracker.ctx.mkNot(var));
     }
 
     static MyVar createBoolExpr(BoolExpr left_var, BoolExpr right_var, String operator){
         // Handle the following binary operators: &, &&, |, ||
         return new MyVar(PathTracker.ctx.mkFalse());
+        // TODO: 
     }
 
     static MyVar createIntExpr(IntExpr var, String operator){
         // Handle the following unary operators for numerical operations: +, -
-        if(operator.equals("+") || operator.equals("-"))
-            return new MyVar(PathTracker.ctx.mkInt(0));
-        return new MyVar(PathTracker.ctx.mkFalse());
+
+        // '+' just stays the same number, only handle '-'
+        if(operator.equals("-"))
+            return new MyVar(PathTracker.ctx.mkSub(PathTracker.ctx.mkInt(0), var));
+        return new MyVar(var);
     }
 
     static MyVar createIntExpr(IntExpr left_var, IntExpr right_var, String operator){
@@ -75,19 +83,23 @@ public class ConcolicExecutionLab {
         if(operator.equals("+") || operator.equals("-") || operator.equals("/") || operator.equals("*") || operator.equals("%") || operator.equals("^"))
             return new MyVar(PathTracker.ctx.mkInt(0));
         return new MyVar(PathTracker.ctx.mkFalse());
+        // TODO: 
     }
 
     static MyVar createStringExpr(SeqExpr left_var, SeqExpr right_var, String operator){
         // We only support String.equals
         return new MyVar(PathTracker.ctx.mkFalse());
+        // TODO: 
     }
 
     static void assign(MyVar var, String name, Expr value, Sort s){
         // All variable assignments, use single static assignment
+        // TODO: 
     }
 
     static void encounteredNewBranch(MyVar condition, boolean value, int line_nr){
         // Call the solver
+        // TODO: 
     }
 
     static void newSatisfiableInput(LinkedList<String> new_inputs) {
@@ -96,6 +108,8 @@ public class ConcolicExecutionLab {
         List<String> trimmed_new_inputs = new_inputs.stream()
                 .map(s -> s.replaceAll("\"", ""))
                 .collect(Collectors.toList());
+
+        // TODO: 
 
     }
 
