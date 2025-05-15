@@ -65,8 +65,19 @@ public class ConcolicExecutionLab {
 
     static MyVar createBoolExpr(BoolExpr left_var, BoolExpr right_var, String operator){
         // Handle the following binary operators: &, &&, |, ||
+        switch (operator) {
+            case "&":
+            case "&&":
+                return new MyVar(PathTracker.ctx.mkAnd(left_var, right_var));
+            case "|":
+            case "||":
+                return new MyVar(PathTracker.ctx.mkOr(left_var, right_var));
+            default:
+                System.out.println("Unknown operator");
+                break;
+        }
+
         return new MyVar(PathTracker.ctx.mkFalse());
-        // TODO: 
     }
 
     static MyVar createIntExpr(IntExpr var, String operator){
