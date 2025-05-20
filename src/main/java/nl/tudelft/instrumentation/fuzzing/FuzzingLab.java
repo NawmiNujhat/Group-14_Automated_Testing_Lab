@@ -34,7 +34,7 @@ public class FuzzingLab {
         static final int TIME_BUDGET_MS = 5 * 60 * 1000;
         static final double RESTART_PROBABILITY = 0.05;
         static final double K = 0.1; 
-        static final boolean RANDOM = true; // Update when switching fuzzing method
+        static final boolean RANDOM = false; // Update when switching fuzzing method
         static Set<Integer> allBranches = new HashSet<>();
         static int noImprove = 0;
         static boolean recordCoverage = true;
@@ -59,8 +59,11 @@ public class FuzzingLab {
                 // "Exceeded " + MAX_BRANCHES_PER_RUN + " branches in one run");
                 // }
 
-                double raw = rawBranchDistance(condition, !value);
-                double normalizedDistance = normalize(raw);
+                double normalizedDistance = rawBranchDistance(condition, value);
+                double normalizedDistanceRawUTaken= rawBranchDistance(condition, !value);
+                // double normalizedDistance = normalize(raw);
+                // double normalizedDistanceRawUTaken=normalize(rawUTaken);
+
                 sumBranchDistance += normalizedDistance;
 
                 int idToken = edgeId(line_nr, value); 
@@ -68,10 +71,10 @@ public class FuzzingLab {
                 visitedBranches.add(idToken);
 
                 latestBranchDistances.put(idToken, normalizedDistance);
-                latestBranchDistances.putIfAbsent(other, 1 - normalizedDistance);
+                latestBranchDistances.putIfAbsent(other, normalizedDistanceRawUTaken);
                 lastExecutionPath.add(idToken);
+                allBranches.add(idToken);
                 allBranches.add(other);
-                allBranches.add(edgeId(line_nr, !value));
         }
 
         static double normalize(double distance) {
@@ -79,19 +82,23 @@ public class FuzzingLab {
         }
 
         static double rawBranchDistance(MyVar condition, boolean actualValue) {
+                double raw;
                 switch (condition.type) {
                         case UNKNOWN:
-                                return 1.0;
+                                raw= 1.0;
+                                break;
                         case BOOL:
 
                                 if (condition.value == actualValue) {
-                                        return 0.0;
+                                        raw= 0.0;
                                 } else {
-                                        return 1.0;
+                                        raw= 1.0;
                                 }
+                                break;
                         case INT:
                         case STRING:
-                                return 1.0;
+                                raw= 1.0;
+                                break;
                         case BINARY:
                                 switch (condition.operator) {
                                         case "==":
@@ -99,40 +106,46 @@ public class FuzzingLab {
                                                                 && condition.right.type == TypeEnum.STRING) {
                                                         String leftStr = condition.left.str_value;
                                                         String rightStr = condition.right.str_value;
-                                                        return actualValue ? 0 : editDistance(leftStr, rightStr);
+                                                        raw= actualValue ? 0 : editDistance(leftStr, rightStr);
                                                 } else {
                                                         double leftval = condition.left.int_value;
                                                         double rightval = condition.right.int_value;
-                                                        return actualValue ? 0.0 : Math.abs(leftval - rightval);
+                                                        raw= actualValue ? 0.0 : Math.abs(leftval - rightval);
                                                 }
+                                                break;
                                         case "!=":
                                                 if (condition.left.type == TypeEnum.STRING
                                                                 && condition.right.type == TypeEnum.STRING) {
                                                         String leftStr = condition.left.str_value;
                                                         String rightStr = condition.right.str_value;
-                                                        return actualValue ? 0 : (leftStr.equals(rightStr) ? 1 : 0);
+                                                        raw= actualValue ? 0 : (leftStr.equals(rightStr) ? 1 : 0);
                                                 } else {
                                                         double leftval = condition.left.int_value;
                                                         double rightval = condition.right.int_value;
                                                         double diff = Math.abs(leftval - rightval);
-                                                        return actualValue ? 0 : ((diff == 0) ? 1 : 0);
+                                                        raw= actualValue ? 0 : ((diff == 0) ? 1 : 0);
                                                 }
+                                                break;
                                         case "<":
                                                 double leftval = condition.left.int_value;
                                                 double rightval = condition.right.int_value;
-                                                return actualValue ? 0 : Math.max(0, leftval - rightval + K);
+                                                raw= actualValue ? 0 : Math.max(0, leftval - rightval + K);
+                                                break;
                                         case "<=":
                                                 leftval = condition.left.int_value;
                                                 rightval = condition.right.int_value;
-                                                return actualValue ? 0 : Math.max(0, leftval - rightval);
+                                                raw= actualValue ? 0 : Math.max(0, leftval - rightval);
+                                                break;
                                         case ">":
                                                 leftval = condition.left.int_value;
                                                 rightval = condition.right.int_value;
-                                                return actualValue ? 0 : Math.max(0, rightval - leftval + K);
+                                                raw= actualValue ? 0 : Math.max(0, rightval - leftval + K);
+                                                break;
                                         case ">=":
                                                 leftval = condition.left.int_value;
                                                 rightval = condition.right.int_value;
-                                                return actualValue ? 0 : Math.max(0, rightval - leftval);
+                                                raw= actualValue ? 0 : Math.max(0, rightval - leftval);
+                                                break;
 
                                         case "&&":
                                         case "&":
@@ -143,9 +156,10 @@ public class FuzzingLab {
                                                                         actualValue);
                                                         double rightdist = rawBranchDistance(condition.right,
                                                                         actualValue);
-                                                        return leftdist + rightdist;
+                                                        raw =normalize(leftdist) + normalize(rightdist);
 
                                                 }
+                                                break;
                                         case "||":
                                         case "|":
                                                 if (actualValue) {
@@ -155,36 +169,40 @@ public class FuzzingLab {
                                                                         actualValue);
                                                         double rightdist = rawBranchDistance(condition.right,
                                                                         actualValue);
-                                                        return Math.min(leftdist, rightdist);
+                                                        raw= Math.min(normalize(leftdist), normalize(rightdist));
 
                                                 }
+                                                break;
                                         case "^":
                                         case "XOR":
                                                 if (actualValue) {
-                                                        return 0.0;
+                                                        raw= 0.0;
                                                 } else {
-                                                        double d1 = rawBranchDistance(condition.left, actualValue) +
-                                                                        rawBranchDistance(condition.right,
-                                                                                        !actualValue);
-                                                        double d2 = rawBranchDistance(condition.right, actualValue) + (1
+                                                        double d1 = normalize(rawBranchDistance(condition.left, actualValue)) +
+                                                        normalize(rawBranchDistance(condition.right,
+                                                                                        !actualValue));
+                                                        double d2 = normalize(rawBranchDistance(condition.right, actualValue)) + normalize(1
                                                                         - rawBranchDistance(condition.left,
                                                                                         !actualValue));
-                                                        return Math.min(d1, d2);
+                                                        raw= Math.min((d1),(d2));
 
                                                 }
+                                                break;
 
                                         default:
-                                                return actualValue ? 0.0 : 1.0;
+                                                raw= actualValue ? 0.0 : 1.0;
 
                                 }
                         case UNARY:
                                 if (condition.operator.equals("!")) {
-                                        return actualValue ? 0 : (1 - rawBranchDistance(condition.left, !actualValue));
+                                        raw= actualValue ? 0 : (1 - normalize(rawBranchDistance(condition.left, !actualValue)));
                                 }
-                                return 1.0;
+                                raw= 1.0;
+                                break;
                         default:
-                                return actualValue ? 0 : 1;
+                                raw= actualValue ? 0 : 1;
                 }
+                return normalize(raw);
 
         }
 
