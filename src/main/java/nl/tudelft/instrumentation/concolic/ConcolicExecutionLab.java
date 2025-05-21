@@ -1,11 +1,13 @@
 package nl.tudelft.instrumentation.concolic;
 
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import javax.naming.Context;
-
 import com.microsoft.z3.*;
+
+import nl.tudelft.instrumentation.fuzzing.DistanceTracker;
 
 /**
  * You should write your solution using this class.
@@ -15,16 +17,30 @@ import com.microsoft.z3.*;
 public class ConcolicExecutionLab {
 
     static Random r = new Random();
-    static Boolean isFinished = false;
     static List<String> currentTrace;
     static int traceLength = 10;
+    static int currentDepth = 0;
+    static int branchCount = 0;
+    static int noImprove = 0;
     static Set<String> discoveredErrorCodes = new HashSet<>();
+    static Set<Integer> visitedBranches = new HashSet<>();
+    static Queue<Node> input_trace_queue = new LinkedList<Node>();
+
+    static final int TIME_BUDGET_MS = 5 * 60 * 1000;
+    static final int RESTART_THRESHOLD = 15;
+    static final int MAX_TRACE_LENGTH = 50;
+
+    static class Node {
+        List<String> element;
+
+        Node(List<String> el) {
+            this.element = el;
+        }
+    }
 
     static void initialize(String[] inputSymbols){
         // Initialise a random trace from the input symbols of the problem.
         currentTrace = generateRandomTrace(inputSymbols);
-        // TODO: initialize needed variables
-        // TODO: Create Nodes?
     }
     
 
@@ -134,18 +150,56 @@ public class ConcolicExecutionLab {
     }
 
     static void encounteredNewBranch(MyVar condition, boolean value, int line_nr){
+        if (!visitedBranches.add(line_nr)) {
+            // Already visited this branch line, skip solving
+            // System.out.println("Already visited branch, skipped.");
+            return;
+        }
+
         // Call the solver
-        // TODO: 
+        Context c = PathTracker.ctx;
+        Solver solver = c.mkSolver();
+
+        // Negate the current condition
+        BoolExpr currentValue = value ? c.mkTrue() : c.mkFalse();
+        BoolExpr flippedCondition = c.mkNot(currentValue);
+
+        solver.add(flippedCondition);
+
+        // Step 3: Try to find a satisfying model
+        if (solver.check() == Status.SATISFIABLE) {
+            Model model = solver.getModel();
+            LinkedList<String> newInputs = new LinkedList<>();
+
+            for (MyVar inputVar : PathTracker.inputs) {
+                Expr valueExpr = model.eval(inputVar.z3var, true);
+                // Ensure we only extract the actual symbolic input variables
+                if (valueExpr != null && valueExpr.isString()) {
+                    newInputs.add(valueExpr.toString());
+                }
+            }
+
+            newSatisfiableInput(newInputs);
+        }
+
+        currentDepth++;
+
+        // Reset path constraint for next run
+        PathTracker.solver.reset();
     }
 
     static void newSatisfiableInput(LinkedList<String> new_inputs) {
         // Hurray! found a new branch using these new inputs!
         // Remove the extra quotes from the inputs that were find by the solver.
+        // System.out.println("Found new satisfiable input.");
         List<String> trimmed_new_inputs = new_inputs.stream()
                 .map(s -> s.replaceAll("\"", ""))
                 .collect(Collectors.toList());
 
-        // TODO: store trimmed_new_inputs somewhere
+        // TODO: Check if currentDepth needs to be stored along side for priority?? BFS right?
+        input_trace_queue.add(new Node(trimmed_new_inputs)); 
+        System.out.println("Input trace queue size: " + input_trace_queue.size());
+        branchCount++;
     }
 
     /**
@@ -179,25 +233,70 @@ public class ConcolicExecutionLab {
 
     static void run() {
         initialize(PathTracker.inputSymbols);
-        PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
+        long deadline = System.currentTimeMillis() + TIME_BUDGET_MS;
+        
         // Place here your code to guide your fuzzer with its search using Concolic Execution.
-        while(!isFinished) {
-            // Do things!
-            // TODO: concolic fuzzer implementation
+        while(System.currentTimeMillis() < deadline) {
+            currentDepth = 0;
+
             try {
-                System.out.println("Woohoo, looping!");
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
+                if (!input_trace_queue.isEmpty()) {
+                    Node el = input_trace_queue.poll();
+
+                    System.out.println("Element: " + el.element);
+                    currentTrace = el.element;
+                    PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
+                } else {
+                    noImprove++;
+                    if(noImprove >= RESTART_THRESHOLD) {
+                        noImprove = 0;
+                        traceLength = Math.min(MAX_TRACE_LENGTH, traceLength + 1);
+
+                        // Restart from random trace
+                        currentTrace = generateRandomTrace(PathTracker.inputSymbols);
+                    }
+                    PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
+                }
+            } catch (Exception e) {
                 e.printStackTrace();
             }
         }
+
+        System.out.println("Run completed.");
+
+        // Finished, write results to csv
+        exportResultsToCSV();
     }
 
     public static void output(String out){
-        System.out.println(out);
+        // System.out.println(out);
         if (out.contains("error_") || out.contains("Error")) {
             String error_code = out.replaceFirst("^Invalid input:\\s*", "");
             discoveredErrorCodes.add(error_code.trim());
+        }
+    }
+
+    static void exportResultsToCSV() {
+        String fileName = "concolic_results.csv";
+        boolean fileExists = new java.io.File(fileName).exists();
+        try (FileWriter writer = new FileWriter(fileName, true)) {
+            if (!fileExists) {
+                writer.write("# of Unique Branches, # of Unique Error Codes, Error Codes\n"); 
+            }
+
+            // Avoid comma issues
+            String errorCodesJoined = discoveredErrorCodes.stream()
+                            .map(code -> code.replaceAll(".*?(\\d+)", "$1")) // Extract numeric part
+                            .sorted(Comparator.comparingInt(Integer::parseInt))
+                            .collect(Collectors.joining("|"));
+
+            writer.write(visitedBranches.size() + ","
+                            + discoveredErrorCodes.size() + ","
+                            + errorCodesJoined);
+
+            System.out.println("Results written to " + fileName);
+        } catch (IOException e) {
+            System.err.println("Failed to write results to CSV: " + e.getMessage());
         }
     }
 
