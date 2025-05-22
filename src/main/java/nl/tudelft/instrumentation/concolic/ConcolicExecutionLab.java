@@ -168,6 +168,7 @@ public class ConcolicExecutionLab {
 
         // Step 3: Try to find a satisfying model
         if (solver.check() == Status.SATISFIABLE) {
+            System.out.println("Found Satisfiable: ");
             Model model = solver.getModel();
             LinkedList<String> newInputs = new LinkedList<>();
 
