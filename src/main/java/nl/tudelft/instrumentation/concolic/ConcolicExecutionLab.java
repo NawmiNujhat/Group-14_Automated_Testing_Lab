@@ -30,10 +30,13 @@ public class ConcolicExecutionLab {
     static Set<String> visitedBranches = new HashSet<>();
     static Set<String> satBranches = new HashSet<>();
     static Set<String> unsatBranches = new HashSet<>();
-
     private static List<BoolExpr> pathConstraints = new ArrayList<>();
     private static PriorityQueue<PrioritizedInput> pendingInputs = new PriorityQueue<>(
-            Comparator.comparingInt((PrioritizedInput p) -> -p.depth));
+            Comparator.<PrioritizedInput>comparingInt(p -> -p.depth));
+    private static final int POP_SIZE = 20;
+    private static final int GENERATIONS = 05;
+    private static final double CROSSOVER_RATE = 0.8;
+    private static final double MUTATION_RATE = 0.2;
 
     static class PrioritizedInput {
         List<String> input;
@@ -43,6 +46,87 @@ public class ConcolicExecutionLab {
             this.input = input;
             this.depth = depth;
         }
+    }
+
+    static class Chromosome {
+        List<String> trace;
+        int fitness;
+
+        Chromosome(List<String> t) {
+            this.trace = new ArrayList<>(t);
+        }
+    }
+
+    static int fitnessOf(List<String> trace) {
+        int before = visitedBranches.size();
+        PathTracker.reset();
+        PathTracker.runNextFuzzedSequence(trace.toArray(new String[0]));
+        return visitedBranches.size() - before;
+
+    }
+
+    static List<Chromosome> initialPopulation(String[] syms) {
+        List<Chromosome> pop = new ArrayList<>(POP_SIZE);
+        pop.add(new Chromosome(currentTrace));
+        for (PrioritizedInput pi : pendingInputs) {
+            pop.add(new Chromosome(pi.input));
+            if (pop.size() >= POP_SIZE) {
+                break;
+            }
+
+        }
+        while (pop.size() < POP_SIZE) {
+            pop.add(new Chromosome(generateRandomTrace(syms)));
+        }
+        return pop;
+    }
+
+    static Chromosome crossOver(Chromosome a, Chromosome b) {
+        if (r.nextDouble() > CROSSOVER_RATE) {
+            return new Chromosome(a.trace);
+        }
+        int cut = r.nextInt(Math.min(a.trace.size(), b.trace.size()));
+        List<String> child = new ArrayList<>();
+        child.addAll(a.trace.subList(0, cut));
+        child.addAll(b.trace.subList(cut, b.trace.size()));
+        return new Chromosome(child);
+    }
+
+    static void mutate(Chromosome c, String[] syms) {
+        for (int i = 0; i < c.trace.size(); i++) {
+            if (r.nextDouble() < MUTATION_RATE) {
+                c.trace.set(i, syms[r.nextInt(syms.length)]);
+            }
+            if (r.nextDouble() < MUTATION_RATE && c.trace.size() > 1) {
+                c.trace.remove(r.nextInt(c.trace.size()));
+            }
+            if (r.nextDouble() < MUTATION_RATE && c.trace.size() < traceLength * 2) {
+                c.trace.add(r.nextInt(c.trace.size() + 1), syms[r.nextInt(syms.length)]);
+            }
+        }
+    }
+
+    static void runGA(String[] syms) {
+        List<Chromosome> pop = initialPopulation(syms);
+        for (int gen = 0; gen < GENERATIONS; gen++) {
+            for (Chromosome c : pop) {
+                c.fitness = fitnessOf(c.trace);
+            }
+            pop.sort((x, y) -> Integer.compare(y.fitness, x.fitness));
+            List<Chromosome> next = new ArrayList<>(pop.subList(0, POP_SIZE / 2));
+            while (next.size() < POP_SIZE) {
+                Chromosome p1 = next.get(r.nextInt(next.size()));
+                Chromosome p2 = next.get(r.nextInt(next.size()));
+                Chromosome child = crossOver(p1, p2);
+                mutate(child, syms);
+                next.add(child);
+
+            }
+            pop = next;
+        }
+        pop.sort((x, y) -> Integer.compare(y.fitness, x.fitness));
+        currentTrace = pop.get(0).trace;
+
     }
 
     static void initialize(String[] inputSymbols) {
@@ -55,7 +139,12 @@ public class ConcolicExecutionLab {
         unsatBranches.clear();
         discoveredErrorCodes.clear();
         currentTrace = generateRandomTrace(inputSymbols);
-        
+
+    }
+
+    static int computeFitness(int prevVisitedCount) {
+        int now = visitedBranches.size();
+        return now - prevVisitedCount;
     }
 
     static MyVar createVar(String name, Expr value, Sort s) {
@@ -77,7 +166,7 @@ public class ConcolicExecutionLab {
         Expr z3var = c.mkConst(c.mkSymbol(name + "_" + PathTracker.z3counter++), s);
         MyVar var = new MyVar(z3var, name);
         PathTracker.inputs.add(var);
-        PathTracker.addToModel(c.mkEq(z3var, value));
+        // PathTracker.addToModel(c.mkEq(z3var, value));
 
         // The following code is to add an additional constraint on the input variable.
         // The input variable must have a value that is equal to one of the input
@@ -185,51 +274,45 @@ public class ConcolicExecutionLab {
             return;
         }
         visitedBranches.add(takenKey);
-        System.out.println("Taken Key: "+takenKey);
+        System.out.println("Taken Key: " + takenKey);
         // Call the solver
         Context ct = PathTracker.ctx;
-        Solver solver = PathTracker.solver;
-        
+        // Solver solver = PathTracker.solver;
+
         BoolExpr actualCondition = (BoolExpr) condition.z3var;
         BoolExpr taken = value ? actualCondition : ct.mkNot(actualCondition);
         currentDepth++;
 
         // pathConstraints.add(taken);
-        PathTracker.addToModel(taken);
-        PathTracker.addToBranches(taken);
+        // solver.add(taken);
+        // PathTracker.addToModel(taken);
+        // PathTracker.addToBranches(taken);
 
         BoolExpr flipped = ct.mkNot(taken);
         if (!satBranches.contains(flipKey) && !unsatBranches.contains(flipKey)) {
-            System.out.println("Flip Key Unvisited: "+flipKey);
-            solver.push();
-            // for (BoolExpr c : pathConstraints) {
-            //     solver.add(c);
-            // }
-            solver.add(flipped);
-            Status st = solver.check();
+            PathTracker.solve(flipped, false);
+            System.out.println("Inputs: " + PathTracker.inputs);
+            Status st = PathTracker.solver.check();
             if (st == Status.SATISFIABLE) {
                 System.out.println("Found Satisfiable value");
                 satBranches.add(flipKey);
-                Model model = solver.getModel();
-                LinkedList<String> modelInputs = new LinkedList<>();
-                for (MyVar v : PathTracker.inputs) {
-                    Expr valueExpr=model.eval(v.z3var,true);
-                    if(valueExpr!=null && valueExpr.isString())
-                    {
-                        modelInputs.add(valueExpr.toString());
-                    }
+                // Model model = solver.getModel();
+                // LinkedList<String> modelInputs = new LinkedList<>();
+                // for (MyVar v : PathTracker.inputs) {
+                // Expr valueExpr = model.eval(v.z3var, true);
+                // if (valueExpr != null && valueExpr.isString()) {
+                // modelInputs.add(valueExpr.toString());
+                // }
 
-                }
-                System.out.println("New Inputs: "+modelInputs);
-                newSatisfiableInput(modelInputs);
-                
+                // }
+                // System.out.println("New Inputs: " + modelInputs);
+                // newSatisfiableInput(modelInputs);
+
             } else {
-                System.out.println("Unsat branch found: "+flipKey);
+                System.out.println("Unsat branch found: " + flipKey);
                 unsatBranches.add(flipKey);
             }
-            System.out.println("Pending Inputs size: "+pendingInputs.size());
-            solver.pop();
-
+            System.out.println("Pending Inputs size: " + pendingInputs.size());
         }
 
     }
@@ -241,9 +324,9 @@ public class ConcolicExecutionLab {
                 .map(s -> s.replaceAll("\"", ""))
                 .collect(Collectors.toList());
         int depth = currentDepth;
-        System.out.println("Current Depth: "+depth);
+        System.out.println("Current Depth: " + depth);
         pendingInputs.add(new PrioritizedInput(trimmed_new_inputs, depth));
-        System.out.println("Pending Inputs size: "+pendingInputs.size());
+        System.out.println("Pending Inputs size: " + pendingInputs.size());
         noImprove = 0;
         System.out.println("** New branch found! Queued input of depth " + depth + ": " + trimmed_new_inputs);
 
@@ -264,6 +347,7 @@ public class ConcolicExecutionLab {
          * change it to your own code.
          */
         if (!pendingInputs.isEmpty()) {
+
             List<String> nextSolverInput = pendingInputs.poll().input;
             System.out.println("Fuzz() using solver-derived input: " + nextSolverInput);
             return nextSolverInput;
@@ -271,14 +355,12 @@ public class ConcolicExecutionLab {
         noImprove++;
         if (noImprove >= RESTART_THRESHOLD) {
             noImprove = 0;
-            if (traceLength < MAX_TRACE_LENGTH) {
-                traceLength++;
-                System.out.println("No improvement for a while. Increasing traceLength to " + traceLength);
-            }
+            System.out.println("★ Random restart ★");
+            return generateRandomTrace(inputSymbols);
         }
-        List<String> randomTrace = generateRandomTrace(inputSymbols);
-        //System.out.println("Fuzz() fallback to random trace: " + randomTrace);
-        return randomTrace;
+        System.out.println("No solver inputs left, doing a GA burst…");
+        runGA(inputSymbols);
+        return currentTrace;
     }
 
     /**
@@ -300,7 +382,6 @@ public class ConcolicExecutionLab {
         long startTime = System.currentTimeMillis();
         long endTime = startTime + TIME_BUDGET_MS;
         int traceCount = 0;
-
         PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
         traceCount++;
         System.out.println("Executed initial trace of length " + currentTrace.size());
@@ -318,13 +399,13 @@ public class ConcolicExecutionLab {
         // }
         while (System.currentTimeMillis() < endTime) {
             PathTracker.reset();
-            //pathConstraints.clear();
+            pathConstraints.clear();
             currentDepth = 0;
             List<String> inputs = fuzz(PathTracker.inputSymbols);
             currentTrace = inputs;
             PathTracker.runNextFuzzedSequence(inputs.toArray(new String[0]));
             traceCount++;
-            //System.out.println("Executed trace of length " + inputs.size());
+            // System.out.println("Executed trace of length " + inputs.size());
 
         }
         System.out.println("==== Experiment finished (5 min) ====");
@@ -358,7 +439,7 @@ public class ConcolicExecutionLab {
 
             writer.write(visitedBranches.size() + ","
                     + discoveredErrorCodes.size() + ","
-                    + errorCodesJoined+"\n");
+                    + errorCodesJoined + "\n");
 
             System.out.println("Results written to " + fileName);
         } catch (IOException e) {
