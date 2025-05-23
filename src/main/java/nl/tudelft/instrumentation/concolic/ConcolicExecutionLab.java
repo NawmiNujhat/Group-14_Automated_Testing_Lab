@@ -63,6 +63,7 @@ public class ConcolicExecutionLab {
 
         Expr z3var = c.mkConst(c.mkSymbol(name + "_" + PathTracker.z3counter++), s); // creating z3var, from createVar function above
         MyVar inputVariable = new MyVar(z3var);
+        PathTracker.inputs.add(inputVariable);
         // The following code is to add an additional constraint on the input variable.
         // The input variable must have a value that is equal to one of the input symbols.
         BoolExpr constraint = c.mkFalse();
