@@ -41,30 +41,38 @@ public class ConcolicExecutionLab {
     private static final Map<Expr, CondInfo> condInfo = new HashMap<>();
     private static final PriorityQueue<BranchTask> branchQueue = new PriorityQueue<>();
     private static boolean satisfiable = false;
+    static double distance = 0.0;
 
-    static class PrioritizedInput {
+    private static class PrioritizedInput implements Comparable<PrioritizedInput>{
         List<String> input;
         int depth;
+        double distance;
 
-        PrioritizedInput(List<String> input, int depth) {
+        PrioritizedInput(List<String> input, int depth, final double distance) {
             this.input = input;
             this.depth = depth;
+            this.distance=distance;
+        }
+        @Override
+        public int compareTo(PrioritizedInput o) {
+            int cmp = Double.compare(this.depth, o.depth);
+            if (cmp != 0)
+                return cmp;
+            return Double.compare(this.distance, o.distance);
         }
     }
 
     private static class BranchTask implements Comparable<BranchTask> {
         final double distance;
-        final List<BoolExpr> constraints;
         final BoolExpr flip;
         final int depth;
-        final String flipKey;
+        final String key;
 
-        BranchTask(double d, List<BoolExpr> c, BoolExpr f, int dep, String flipKey) {
+        BranchTask(double d, BoolExpr f, int dep, String key) {
             this.distance = d;
-            this.constraints = c;
             this.flip = f;
             this.depth = dep;
-            this.flipKey = flipKey;
+            this.key = key;
         }
 
         @Override
@@ -72,7 +80,7 @@ public class ConcolicExecutionLab {
             int cmp = Double.compare(this.depth, o.depth);
             if (cmp != 0)
                 return cmp;
-            return Double.compare(o.distance, this.distance);
+            return Double.compare(this.distance, o.distance);
         }
     }
 
@@ -183,6 +191,7 @@ public class ConcolicExecutionLab {
         satBranches.clear();
         unsatBranches.clear();
         discoveredErrorCodes.clear();
+        branchQueue.clear();
         currentTrace = generateRandomTrace(inputSymbols);
 
     }
@@ -212,7 +221,7 @@ public class ConcolicExecutionLab {
         Expr z3var = c.mkConst(c.mkSymbol(name + "_" + PathTracker.z3counter++), s);
         MyVar var = new MyVar(z3var, name);
         PathTracker.inputs.add(var);
-        // PathTracker.addToModel(c.mkEq(z3var, value));
+        PathTracker.addToModel(c.mkEq(z3var, value));
 
         // The following code is to add an additional constraint on the input variable.
         // The input variable must have a value that is equal to one of the input
@@ -479,38 +488,25 @@ public class ConcolicExecutionLab {
             visitedBranches.add(takenKey);
             // System.out.println("Taken Key: " + takenKey);
         }
-        if (satBranches.contains(flipKey)||unsatBranches.contains(flipKey)) {
+        if (satBranches.contains(flipKey) || unsatBranches.contains(flipKey)) {
             return;
         }
         // Call the solver
+        distance = rawBranchDistance(condition, !value);
+        System.out.println("Distance: "+distance);
         Context ct = PathTracker.ctx;
         BoolExpr actual = (BoolExpr) condition.z3var;
         BoolExpr taken = value ? actual : ct.mkNot(actual);
         currentDepth++;
-
         BoolExpr flipped = ct.mkNot(taken);
-        
-        pathConstraints.add(taken);
-        List<BoolExpr> pcAndFlip = new ArrayList<>(pathConstraints);
-        BoolExpr query = ct.mkAnd(pcAndFlip.toArray(new BoolExpr[0]));
         satisfiable = false;
-        // System.out.println("» SOLVE QUERY: " + query);
-        PathTracker.solve(query, true);
-        System.out.println("Inputs: " + PathTracker.inputs);
-        if (satisfiable) {
-        // System.out.println("Found Satisfiable value");
-        // PathTracker.addToBranches(taken);
-        satBranches.add(flipKey);
-       
-        } else {
-        System.out.println("Unsat branch found: " + flipKey);
-        // unsatBranches.add(flipKey);
-        }
+            PathTracker.solve(flipped, false);
+            if (satisfiable) {
+                satBranches.add(flipKey);
+            } else {
+                unsatBranches.add(flipKey);
+            }
         
-        PathTracker.addToBranches(taken);
-        double dist = rawBranchDistance(condition, !value);
-        branchQueue.add(new BranchTask(dist, new ArrayList<>(pathConstraints),
-        flipped, currentDepth, flipKey));
         System.out.println("Pending Inputs size: " + pendingInputs.size());
 
     }
@@ -523,11 +519,7 @@ public class ConcolicExecutionLab {
                 .map(s -> s.replaceAll("\"", ""))
                 .collect(Collectors.toList());
         int depth = currentDepth;
-        // System.out.println("Current Depth: " + depth);
-        // String[] syms = PathTracker.inputSymbols;
-        // String extra = syms[r.nextInt(syms.length)];
-        // trimmed_new_inputs.add(extra);
-        pendingInputs.add(new PrioritizedInput(trimmed_new_inputs, depth));
+        pendingInputs.add(new PrioritizedInput(trimmed_new_inputs, depth, distance));
         // System.out.println("Pending Inputs size: " + pendingInputs.size());
         noImprove = 0;
         System.out.println("** New branch found! Queued input of depth " + depth + ":" + trimmed_new_inputs);
@@ -554,48 +546,7 @@ public class ConcolicExecutionLab {
             System.out.println("Fuzz() using solver-derived input: " + nextSolverInput);
             return nextSolverInput;
         }
-        while (!branchQueue.isEmpty()) {
-            System.out.println("Taking From Branch Queue");
-            BranchTask task = branchQueue.poll();
-            String key = task.flipKey;
-            if (satBranches.contains(key))
-                continue;
-
-            Solver solver = PathTracker.ctx.mkSolver();
-            solver.push();
-            // add snapshot constraints
-            for (BoolExpr c : task.constraints)
-                solver.add(c);
-            solver.add(task.flip);
-            if (solver.check() == Status.SATISFIABLE) {
-                System.out.println("Found Satisfiable from Branch Queue");
-                Model m = solver.getModel();
-                LinkedList<String> modelInput = new LinkedList<>();
-                for (MyVar v : PathTracker.inputs) {
-                    Expr ev = m.evaluate(v.z3var, true);
-                    if (ev != null && ev.isString())
-                        modelInput.add(ev.toString().replaceAll("\"", ""));
-                }
-                satBranches.add(key);
-                solver.pop();
-                return modelInput;
-            } else {
-                // unsatBranches.add(key);
-                System.out.print("Unsat found");
-                // solver.pop();
-            }
-        }
-        noImprove++;
-        if (noImprove >= RESTART_THRESHOLD && pendingInputs.isEmpty() && branchQueue.isEmpty()) {
-            noImprove = 0;
-            traceLength = Math.min(MAX_TRACE_LENGTH, traceLength + 1);
-            // System.out.println("★ Random restart ★");
-            //runGA(inputSymbols);
-            currentTrace = generateRandomTrace(inputSymbols);
-        }
-        // System.out.println("No solver inputs left, doing a GA burst…");
-
-        return currentTrace;
+        return generateRandomTrace(inputSymbols);
     }
 
     /**
@@ -626,7 +577,10 @@ public class ConcolicExecutionLab {
             currentTrace = inputs;
             PathTracker.reset();
             pathConstraints.clear();
+            satBranches.clear();
+            unsatBranches.clear();
             currentDepth = 0;
+            distance = 0.0;
             // System.out.println("Executed trace of length " + inputs.size());
 
         }
