@@ -38,6 +38,10 @@ public class ConcolicExecutionLab {
     private static final double CROSSOVER_RATE = 0.8;
     private static final double MUTATION_RATE = 0.2;
 
+    private static final Map<Expr, CondInfo> condInfo = new HashMap<>();
+    private static final PriorityQueue<BranchTask> branchQueue = new PriorityQueue<>();
+    private static boolean satisfiable = false;
+
     static class PrioritizedInput {
         List<String> input;
         int depth;
@@ -45,6 +49,47 @@ public class ConcolicExecutionLab {
         PrioritizedInput(List<String> input, int depth) {
             this.input = input;
             this.depth = depth;
+        }
+    }
+
+    private static class BranchTask implements Comparable<BranchTask> {
+        final double distance;
+        final List<BoolExpr> constraints;
+        final BoolExpr flip;
+        final int depth;
+        final String flipKey;
+
+        BranchTask(double d, List<BoolExpr> c, BoolExpr f, int dep, String flipKey) {
+            this.distance = d;
+            this.constraints = c;
+            this.flip = f;
+            this.depth = dep;
+            this.flipKey = flipKey;
+        }
+
+        @Override
+        public int compareTo(BranchTask o) {
+            int cmp = Double.compare(this.depth, o.depth);
+            if (cmp != 0)
+                return cmp;
+            return Double.compare(o.distance, this.distance);
+        }
+    }
+
+    private enum Kind {
+        BOOL, INT, STRING
+    };
+
+    private static class CondInfo {
+        final Kind kind;
+        final String op;
+        final MyVar left, right;
+
+        CondInfo(Kind kind, String op, MyVar left, MyVar right) {
+            this.kind = kind;
+            this.op = op;
+            this.left = left;
+            this.right = right;
         }
     }
 
@@ -157,6 +202,7 @@ public class ConcolicExecutionLab {
          */
         Expr z3var = c.mkConst(c.mkSymbol(name + "_" + PathTracker.z3counter++), s);
         PathTracker.addToModel(c.mkEq(z3var, value));
+        pathConstraints.add(c.mkEq(z3var, value));
         return new MyVar(z3var, name);
     }
 
@@ -177,8 +223,9 @@ public class ConcolicExecutionLab {
         }
 
         PathTracker.addToModel(constraint);
+        pathConstraints.add(constraint);
 
-        return new MyVar(z3var, name);
+        return var;
     }
 
     static MyVar createBoolExpr(BoolExpr var, String operator) {
@@ -188,7 +235,10 @@ public class ConcolicExecutionLab {
             throw new IllegalArgumentException("Unsupported Boolean Operator: " + operator);
         }
         BoolExpr neg = c.mkNot(var);
-        return createVar("u_not", neg, c.getBoolSort());
+        MyVar v = createVar("u_not", neg, c.getBoolSort());
+        condInfo.put(v.z3var, new CondInfo(Kind.BOOL, "!", new MyVar(var, ""), null));
+        return v;
+
     }
 
     static MyVar createBoolExpr(BoolExpr left_var, BoolExpr right_var, String operator) {
@@ -202,7 +252,12 @@ public class ConcolicExecutionLab {
         } else {
             throw new IllegalArgumentException("Unsupported Boolean Operator: " + operator);
         }
-        return createVar("b_" + operator.replaceAll("\\W", ""), expr, c.getBoolSort());
+        MyVar v = createVar("b_" + operator.replaceAll("\\W", ""), expr, c.getBoolSort());
+        condInfo.put(v.z3var,
+                new CondInfo(Kind.BOOL, operator,
+                        new MyVar(left_var, /* dummy */""),
+                        new MyVar(right_var, /* dummy */"")));
+        return v;
     }
 
     static MyVar createIntExpr(IntExpr var, String operator) {
@@ -212,7 +267,9 @@ public class ConcolicExecutionLab {
         }
         Context c = PathTracker.ctx;
         ArithExpr e = operator.equals("-") ? c.mkUnaryMinus(var) : var;
-        return createVar("u_" + operator, e, c.getIntSort());
+        MyVar v = createVar("u_" + operator, e, c.getIntSort());
+        condInfo.put(v.z3var, new CondInfo(Kind.INT, operator, new MyVar(var, ""), null));
+        return v;
 
     }
 
@@ -220,32 +277,51 @@ public class ConcolicExecutionLab {
         // Handle the following binary operators for numerical operations: +, -, /, *,
         // %, ^, ==, <=, <, >= and >
         Context c = PathTracker.ctx;
+        MyVar v = null;
         switch (operator) {
             case "+":
-                return createVar("i_add", c.mkAdd(left_var, right_var), c.getIntSort());
+                v = createVar("i_add", c.mkAdd(left_var, right_var), c.getIntSort());
+                break;
             case "-":
-                return createVar("i_sub", c.mkSub(left_var, right_var), c.getIntSort());
+                v = createVar("i_sub", c.mkSub(left_var, right_var), c.getIntSort());
+                break;
             case "*":
-                return createVar("i_mul", c.mkMul(left_var, right_var), c.getIntSort());
+                v = createVar("i_mul", c.mkMul(left_var, right_var), c.getIntSort());
+                break;
             case "/":
-                return createVar("i_div", c.mkDiv(left_var, right_var), c.getIntSort());
+                v = createVar("i_div", c.mkDiv(left_var, right_var), c.getIntSort());
+                break;
             case "%":
-                return createVar("i_mod", c.mkMod(left_var, right_var), c.getIntSort());
+                v = createVar("i_mod", c.mkMod(left_var, right_var), c.getIntSort());
+                break;
             case "^":
-                return createVar("i_pow", c.mkPower(left_var, right_var), c.getIntSort());
+                v = createVar("i_pow", c.mkPower(left_var, right_var), c.getIntSort());
+                break;
             case "==":
-                return createVar("i_eq", c.mkEq(left_var, right_var), c.getBoolSort());
+                v = createVar("i_eq", c.mkEq(left_var, right_var), c.getBoolSort());
+                break;
             case "<=":
-                return createVar("i_le", c.mkLe(left_var, right_var), c.getBoolSort());
+                v = createVar("i_le", c.mkLe(left_var, right_var), c.getBoolSort());
+                break;
             case "<":
-                return createVar("i_lt", c.mkLt(left_var, right_var), c.getBoolSort());
+                v = createVar("i_lt", c.mkLt(left_var, right_var), c.getBoolSort());
+                break;
             case ">=":
-                return createVar("i_ge", c.mkGe(left_var, right_var), c.getBoolSort());
+                v = createVar("i_ge", c.mkGe(left_var, right_var), c.getBoolSort());
+                break;
             case ">":
-                return createVar("i_add", c.mkGt(left_var, right_var), c.getBoolSort());
+                v = createVar("i_gt", c.mkGt(left_var, right_var), c.getBoolSort());
+                break;
+            case "!=":
+                v = createVar("i_ne",
+                        c.mkNot(c.mkEq(left_var, right_var)),
+                        c.getBoolSort());
+                break;
             default:
                 throw new IllegalArgumentException("Unsupported Operator Arithmetic: " + operator);
         }
+        condInfo.put(v.z3var, new CondInfo(Kind.INT, operator, new MyVar(left_var, ""), new MyVar(right_var, "")));
+        return v;
     }
 
     static MyVar createStringExpr(SeqExpr left_var, SeqExpr right_var, String operator) {
@@ -255,7 +331,15 @@ public class ConcolicExecutionLab {
             throw new IllegalArgumentException("Unsupported String Operator: " + operator);
         }
         BoolExpr eq = c.mkEq(left_var, right_var);
-        return createVar("s_eq", eq, c.getBoolSort());
+        MyVar v = createVar("s_eq", eq, c.getBoolSort());
+        condInfo.put(
+                v.z3var,
+                new CondInfo(
+                        Kind.STRING,
+                        operator,
+                        new MyVar(left_var, ""),
+                        new MyVar(right_var, "")));
+        return v;
     }
 
     static void assign(MyVar var, String name, Expr value, Sort s) {
@@ -263,72 +347,190 @@ public class ConcolicExecutionLab {
         Context c = PathTracker.ctx;
         Expr z3var = c.mkConst(c.mkSymbol(name + "_" + PathTracker.z3counter++), s);
         PathTracker.addToModel(c.mkEq(z3var, value));
+        pathConstraints.add(c.mkEq(z3var, value));
         var.z3var = z3var;
         var.name = name;
+    }
+
+    static double rawBranchDistance(MyVar condition, boolean actualValue) {
+
+        CondInfo info = condInfo.get(condition.z3var);
+        if (info == null) {
+            return actualValue ? 0.0 : 1.0;
+        }
+
+        double raw;
+        switch (info.kind) {
+            case BOOL:
+                switch (info.op) {
+                    case "!":
+                        // unary negation: distance is zero if actualValue matches !operand
+                        boolean operand = Boolean.parseBoolean(info.left.z3var.getSExpr());
+                        raw = (actualValue == (!operand)) ? 0.0 : 1.0;
+                        break;
+                    case "&&":
+                    case "&":
+                        // to satisfy A && B, both must be true
+                        if (actualValue) {
+                            double d1 = rawBranchDistance(info.left, true);
+                            double d2 = rawBranchDistance(info.right, true);
+                            raw = d1 + d2;
+                        } else {
+                            // if the conjunction failed, pick the smaller distance to flipping either side
+                            double d1f = rawBranchDistance(info.left, false);
+                            double d2f = rawBranchDistance(info.right, false);
+                            raw = Math.min(d1f, d2f);
+                        }
+                        break;
+                    case "||":
+                    case "|":
+                        // to satisfy A || B, at least one must be true
+                        if (actualValue) {
+                            // if it succeeded, pick the smaller distance to making either side true
+                            double d1 = rawBranchDistance(info.left, true);
+                            double d2 = rawBranchDistance(info.right, true);
+                            raw = Math.min(d1, d2);
+                        } else {
+                            // if the disjunction failed (both false), sum their distances
+                            raw = rawBranchDistance(info.left, false)
+                                    + rawBranchDistance(info.right, false);
+                        }
+                        break;
+                    default:
+                        // fall back to simple boolean mismatch
+                        raw = actualValue ? 0.0 : 1.0;
+                }
+                break;
+
+            case INT: {
+                long l = Long.parseLong(info.left.z3var.getSExpr());
+                long r = Long.parseLong(info.right.z3var.getSExpr());
+                switch (info.op) {
+                    case "==":
+                        raw = actualValue ? 0.0 : Math.abs(l - r);
+                        break;
+                    case "!=":
+                        raw = actualValue ? 0.0 : (l == r ? 1.0 : 0.0);
+                        break;
+                    case "<":
+                        raw = actualValue ? 0.0 : Math.max(0, l - r + 1);
+                        break;
+                    case "<=":
+                        raw = actualValue ? 0.0 : Math.max(0, l - r);
+                        break;
+                    case ">":
+                        raw = actualValue ? 0.0 : Math.max(0, r - l + 1);
+                        break;
+                    case ">=":
+                        raw = actualValue ? 0.0 : Math.max(0, r - l);
+                        break;
+                    default:
+                        raw = 1.0;
+                }
+            }
+                break;
+
+            case STRING: {
+                String ls = info.left.z3var.toString().replaceAll("^\"|\"$", "");
+                String rs = info.right.z3var.toString().replaceAll("^\"|\"$", "");
+                if (info.op.equals("equals") || info.op.equals("==")) {
+                    raw = actualValue ? 0.0 : editDistance(ls, rs);
+                } else {
+                    raw = 1.0;
+                }
+            }
+                break;
+
+            default:
+                raw = actualValue ? 0.0 : 1.0;
+        }
+
+        // normalize into [0,1)
+        return raw / (raw + 1.0);
+    }
+
+    static int editDistance(String str1, String str2) {
+        int m = str1.length();
+        int n = str2.length();
+        int[][] dp = new int[m + 1][n + 1];
+        for (int i = 0; i <= m; i++) {
+            for (int j = 0; j <= n; j++) {
+                if (i == 0) {
+                    dp[i][j] = j;
+                } else if (j == 0) {
+                    dp[i][j] = i;
+                } else if (str1.charAt(i - 1) == str2.charAt(j - 1)) {
+                    dp[i][j] = dp[i - 1][j - 1];
+                } else {
+                    dp[i][j] = 1 + Math.min(
+                            Math.min(dp[i][j - 1],
+                                    dp[i - 1][j]),
+                            dp[i - 1][j - 1]);
+                }
+            }
+        }
+        return dp[m][n];
     }
 
     static void encounteredNewBranch(MyVar condition, boolean value, int line_nr) {
         String takenKey = line_nr + ":" + value;
         String flipKey = line_nr + ":" + !value;
-        if (visitedBranches.contains(takenKey)) {
+        if (!visitedBranches.contains(takenKey)) {
+            visitedBranches.add(takenKey);
+            // System.out.println("Taken Key: " + takenKey);
+        }
+        if (satBranches.contains(flipKey)||unsatBranches.contains(flipKey)) {
             return;
         }
-        visitedBranches.add(takenKey);
-        System.out.println("Taken Key: " + takenKey);
         // Call the solver
         Context ct = PathTracker.ctx;
-        // Solver solver = PathTracker.solver;
-
-        BoolExpr actualCondition = (BoolExpr) condition.z3var;
-        BoolExpr taken = value ? actualCondition : ct.mkNot(actualCondition);
+        BoolExpr actual = (BoolExpr) condition.z3var;
+        BoolExpr taken = value ? actual : ct.mkNot(actual);
         currentDepth++;
 
-        // pathConstraints.add(taken);
-        // solver.add(taken);
-        // PathTracker.addToModel(taken);
-        // PathTracker.addToBranches(taken);
-
         BoolExpr flipped = ct.mkNot(taken);
-        if (!satBranches.contains(flipKey) && !unsatBranches.contains(flipKey)) {
-            PathTracker.solve(flipped, false);
-            System.out.println("Inputs: " + PathTracker.inputs);
-            Status st = PathTracker.solver.check();
-            if (st == Status.SATISFIABLE) {
-                System.out.println("Found Satisfiable value");
-                satBranches.add(flipKey);
-                // Model model = solver.getModel();
-                // LinkedList<String> modelInputs = new LinkedList<>();
-                // for (MyVar v : PathTracker.inputs) {
-                // Expr valueExpr = model.eval(v.z3var, true);
-                // if (valueExpr != null && valueExpr.isString()) {
-                // modelInputs.add(valueExpr.toString());
-                // }
-
-                // }
-                // System.out.println("New Inputs: " + modelInputs);
-                // newSatisfiableInput(modelInputs);
-
-            } else {
-                System.out.println("Unsat branch found: " + flipKey);
-                unsatBranches.add(flipKey);
-            }
-            System.out.println("Pending Inputs size: " + pendingInputs.size());
+        
+        pathConstraints.add(taken);
+        List<BoolExpr> pcAndFlip = new ArrayList<>(pathConstraints);
+        BoolExpr query = ct.mkAnd(pcAndFlip.toArray(new BoolExpr[0]));
+        satisfiable = false;
+        // System.out.println("» SOLVE QUERY: " + query);
+        PathTracker.solve(query, true);
+        System.out.println("Inputs: " + PathTracker.inputs);
+        if (satisfiable) {
+        // System.out.println("Found Satisfiable value");
+        // PathTracker.addToBranches(taken);
+        satBranches.add(flipKey);
+       
+        } else {
+        System.out.println("Unsat branch found: " + flipKey);
+        // unsatBranches.add(flipKey);
         }
+        
+        PathTracker.addToBranches(taken);
+        double dist = rawBranchDistance(condition, !value);
+        branchQueue.add(new BranchTask(dist, new ArrayList<>(pathConstraints),
+        flipped, currentDepth, flipKey));
+        System.out.println("Pending Inputs size: " + pendingInputs.size());
 
     }
 
     static void newSatisfiableInput(LinkedList<String> new_inputs) {
         // Hurray! found a new branch using these new inputs!
         // Remove the extra quotes from the inputs that were find by the solver.
+        satisfiable = true;
         List<String> trimmed_new_inputs = new_inputs.stream()
                 .map(s -> s.replaceAll("\"", ""))
                 .collect(Collectors.toList());
         int depth = currentDepth;
-        System.out.println("Current Depth: " + depth);
+        // System.out.println("Current Depth: " + depth);
+        // String[] syms = PathTracker.inputSymbols;
+        // String extra = syms[r.nextInt(syms.length)];
+        // trimmed_new_inputs.add(extra);
         pendingInputs.add(new PrioritizedInput(trimmed_new_inputs, depth));
-        System.out.println("Pending Inputs size: " + pendingInputs.size());
+        // System.out.println("Pending Inputs size: " + pendingInputs.size());
         noImprove = 0;
-        System.out.println("** New branch found! Queued input of depth " + depth + ": " + trimmed_new_inputs);
+        System.out.println("** New branch found! Queued input of depth " + depth + ":" + trimmed_new_inputs);
 
     }
 
@@ -352,14 +554,47 @@ public class ConcolicExecutionLab {
             System.out.println("Fuzz() using solver-derived input: " + nextSolverInput);
             return nextSolverInput;
         }
-        noImprove++;
-        if (noImprove >= RESTART_THRESHOLD) {
-            noImprove = 0;
-            System.out.println("★ Random restart ★");
-            return generateRandomTrace(inputSymbols);
+        while (!branchQueue.isEmpty()) {
+            System.out.println("Taking From Branch Queue");
+            BranchTask task = branchQueue.poll();
+            String key = task.flipKey;
+            if (satBranches.contains(key))
+                continue;
+
+            Solver solver = PathTracker.ctx.mkSolver();
+            solver.push();
+            // add snapshot constraints
+            for (BoolExpr c : task.constraints)
+                solver.add(c);
+            solver.add(task.flip);
+            if (solver.check() == Status.SATISFIABLE) {
+                System.out.println("Found Satisfiable from Branch Queue");
+                Model m = solver.getModel();
+                LinkedList<String> modelInput = new LinkedList<>();
+                for (MyVar v : PathTracker.inputs) {
+                    Expr ev = m.evaluate(v.z3var, true);
+                    if (ev != null && ev.isString())
+                        modelInput.add(ev.toString().replaceAll("\"", ""));
+                }
+                satBranches.add(key);
+                solver.pop();
+                return modelInput;
+            } else {
+                // unsatBranches.add(key);
+                System.out.print("Unsat found");
+                // solver.pop();
+            }
         }
-        System.out.println("No solver inputs left, doing a GA burst…");
-        runGA(inputSymbols);
+        noImprove++;
+        if (noImprove >= RESTART_THRESHOLD && pendingInputs.isEmpty() && branchQueue.isEmpty()) {
+            noImprove = 0;
+            traceLength = Math.min(MAX_TRACE_LENGTH, traceLength + 1);
+            // System.out.println("★ Random restart ★");
+            //runGA(inputSymbols);
+            currentTrace = generateRandomTrace(inputSymbols);
+        }
+        // System.out.println("No solver inputs left, doing a GA burst…");
+
         return currentTrace;
     }
 
@@ -382,29 +617,16 @@ public class ConcolicExecutionLab {
         long startTime = System.currentTimeMillis();
         long endTime = startTime + TIME_BUDGET_MS;
         int traceCount = 0;
-        PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
-        traceCount++;
-        System.out.println("Executed initial trace of length " + currentTrace.size());
 
-        // Place here your code to guide your fuzzer with its search using Concolic
-        // Execution.
-        // while (!isFinished) {
-        // // Do things!
-        // try {
-        // System.out.println("Woohoo, looping!");
-        // Thread.sleep(1000);
-        // } catch (InterruptedException e) {
-        // e.printStackTrace();
-        // }
-        // }
+        System.out.println("Executed initial trace of length " + currentTrace.size());
         while (System.currentTimeMillis() < endTime) {
+            PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
+            traceCount++;
+            List<String> inputs = fuzz(PathTracker.inputSymbols);
+            currentTrace = inputs;
             PathTracker.reset();
             pathConstraints.clear();
             currentDepth = 0;
-            List<String> inputs = fuzz(PathTracker.inputSymbols);
-            currentTrace = inputs;
-            PathTracker.runNextFuzzedSequence(inputs.toArray(new String[0]));
-            traceCount++;
             // System.out.println("Executed trace of length " + inputs.size());
 
         }

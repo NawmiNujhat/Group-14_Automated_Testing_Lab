@@ -68,9 +68,9 @@ public class PathTracker {
 
         if(printModel){
             System.out.print("Model: ");
-            System.out.println(PathTracker.z3model);
-            System.out.print("Branches: ");
-            System.out.println(PathTracker.z3branches);
+            // System.out.println(PathTracker.z3model);
+            // System.out.print("Branches: ");
+            // System.out.println(PathTracker.z3branches);
             System.out.print("New branch: ");
             System.out.println(new_branch);
         }
