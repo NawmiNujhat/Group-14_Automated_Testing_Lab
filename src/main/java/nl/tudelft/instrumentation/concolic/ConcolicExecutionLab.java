@@ -34,12 +34,12 @@ public class ConcolicExecutionLab {
         int d = Integer.compare(b.depth, a.depth);
         if (d != 0)
             return d;
-        return Double.compare(b.distance, a.distance);
+        return Double.compare(a.distance, b.distance);
     });
     static final double RESTART_PROBABILITY = 0.05;
     static final int TIME_BUDGET_MS = 5 * 60 * 1000;
-    static final int RESTART_THRESHOLD = 15;
-    static final int MAX_TRACE_LENGTH = 50;
+    static final int RESTART_THRESHOLD = 20;
+    static final int MAX_TRACE_LENGTH = 200;
     static double distance = 0.0;
     private static final Map<Expr, CondInfo> condInfo = new HashMap<>();
 
@@ -479,12 +479,19 @@ public class ConcolicExecutionLab {
         long deadline = startTime + TIME_BUDGET_MS;
         double epsilon = 0.25;
         double decay = 0.9995;
-        double epsilon_min = 0.20;
+        double epsilon_min = 0.05;
+        int lastBranchCount=0;
 
         // Place here your code to guide your fuzzer with its search using Concolic
         // Execution.
         while (System.currentTimeMillis() < deadline) {
             currentDepth = 0;
+            if (branchCount > lastBranchCount) { 
+                epsilon = Math.max(epsilon_min, epsilon * decay);
+                lastBranchCount = branchCount;
+            } else {
+                epsilon = Math.min(1.0, epsilon + 0.05);
+            }
             boolean explore = Math.random() < epsilon && pendingInputs.isEmpty();
 
             try {
