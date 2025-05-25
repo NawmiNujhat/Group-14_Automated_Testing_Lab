@@ -557,8 +557,8 @@ public class ConcolicExecutionLab {
         noImprove++;
         if (noImprove >= RESTART_THRESHOLD && pendingInputs.isEmpty()) {
             noImprove = 0;
-            traceLength = Math.min(MAX_TRACE_LENGTH, traceLength + 1);
-            // System.out.println("★ Random restart ★");
+            traceLength = Math.min(MAX_TRACE_LENGTH, traceLength + 5);
+            System.out.println("No solver inputs left, doing a GA burst…");
             runGA(inputSymbols);
             // currentTrace = generateRandomTrace(inputSymbols);
         }
