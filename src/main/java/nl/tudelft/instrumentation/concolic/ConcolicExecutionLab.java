@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.microsoft.z3.*;
 
@@ -29,20 +30,45 @@ public class ConcolicExecutionLab {
     static Set<String> pathConstraints = new HashSet<>();
     static Set<String> satBranches = new HashSet<>();
     static Set<String> unsatBranches = new HashSet<>();
-    private static PriorityQueue<PrioritizedInput> pendingInputs = new PriorityQueue<>(
-            Comparator.<PrioritizedInput>comparingInt(p -> -p.depth));
+    private static PriorityQueue<PrioritizedInput> pendingInputs = new PriorityQueue<>((a, b) -> {
+        int d = Integer.compare(b.depth, a.depth);
+        if (d != 0)
+            return d;
+        return Double.compare(b.distance, a.distance);
+    });
     static final double RESTART_PROBABILITY = 0.05;
     static final int TIME_BUDGET_MS = 5 * 60 * 1000;
     static final int RESTART_THRESHOLD = 15;
     static final int MAX_TRACE_LENGTH = 50;
+    static double distance = 0.0;
+    private static final Map<Expr, CondInfo> condInfo = new HashMap<>();
 
-    static class PrioritizedInput {
+    private static class PrioritizedInput {
         List<String> input;
         int depth;
+        double distance;
 
-        PrioritizedInput(List<String> input, int depth) {
+        PrioritizedInput(List<String> input, int depth, double distance) {
             this.input = input;
             this.depth = depth;
+            this.distance = distance;
+        }
+    }
+
+    private enum Kind {
+        BOOL, INT, STRING
+    };
+
+    private static class CondInfo {
+        final Kind kind;
+        final String op;
+        final MyVar left, right;
+
+        CondInfo(Kind kind, String op, MyVar left, MyVar right) {
+            this.kind = kind;
+            this.op = op;
+            this.left = left;
+            this.right = right;
         }
     }
 
@@ -93,73 +119,133 @@ public class ConcolicExecutionLab {
 
     static MyVar createBoolExpr(BoolExpr var, String operator) {
         // Handle the following unary operators: !
-        return new MyVar(PathTracker.ctx.mkNot(var));
+        MyVar v = new MyVar(PathTracker.ctx.mkNot(var));
+        condInfo.put(v.z3var, new CondInfo(Kind.BOOL, "!", new MyVar(var, ""), null));
+        return v;
     }
 
     static MyVar createBoolExpr(BoolExpr left_var, BoolExpr right_var, String operator) {
         // Handle the following binary operators: &, &&, |, ||
+        MyVar v = null;
         switch (operator) {
             case "&":
             case "&&":
-                return new MyVar(PathTracker.ctx.mkAnd(left_var, right_var));
+                v = new MyVar(PathTracker.ctx.mkAnd(left_var, right_var));
+                break;
             case "|":
             case "||":
-                return new MyVar(PathTracker.ctx.mkOr(left_var, right_var));
+                v = new MyVar(PathTracker.ctx.mkOr(left_var, right_var));
+                break;
             default:
-                System.out.println("Unknow Operator: " + operator);
+                System.out.println("Unknow Operator in Bool: " + operator);
                 System.exit(0);
-                return new MyVar(PathTracker.ctx.mkFalse());
+                v = new MyVar(PathTracker.ctx.mkFalse());
+                break;
         }
+        condInfo.put(v.z3var,
+                new CondInfo(Kind.BOOL, operator,
+                        new MyVar(left_var, /* dummy */""),
+                        new MyVar(right_var, /* dummy */"")));
+        return v;
+
     }
 
     static MyVar createIntExpr(IntExpr var, String operator) {
         // Handle the following unary operators for numerical operations: +, -
 
         // '+' just stays the same number, only handle '-'
+        MyVar v = null;
         if (operator.equals("-"))
-            return new MyVar(PathTracker.ctx.mkSub(PathTracker.ctx.mkInt(0), var));
-        return new MyVar(var);
+            v = new MyVar(PathTracker.ctx.mkSub(PathTracker.ctx.mkInt(0), var));
+        condInfo.put(v.z3var, new CondInfo(Kind.INT, operator, new MyVar(var, ""), null));
+        return v;
     }
 
     static MyVar createIntExpr(IntExpr left_var, IntExpr right_var, String operator) {
         // Handle the following binary operators for numerical operations: +, -, /, *,
         // %, ^, ==, <=, <, >= and >
+        MyVar v = null;
         switch (operator) {
             case "+":
-                return new MyVar(PathTracker.ctx.mkAdd(left_var, right_var));
+                v = new MyVar(PathTracker.ctx.mkAdd(left_var, right_var));
+                condInfo.put(v.z3var,
+                        new CondInfo(Kind.INT, operator, new MyVar(left_var, ""), new MyVar(right_var, "")));
+                return v;
+
             case "-":
-                return new MyVar(PathTracker.ctx.mkSub(left_var, right_var));
+                v = new MyVar(PathTracker.ctx.mkSub(left_var, right_var));
+                condInfo.put(v.z3var,
+                        new CondInfo(Kind.INT, operator, new MyVar(left_var, ""), new MyVar(right_var, "")));
+                return v;
             case "/":
-                return new MyVar(PathTracker.ctx.mkDiv(left_var, right_var));
+                v = new MyVar(PathTracker.ctx.mkDiv(left_var, right_var));
+                condInfo.put(v.z3var,
+                        new CondInfo(Kind.INT, operator, new MyVar(left_var, ""), new MyVar(right_var, "")));
+                return v;
             case "*":
-                return new MyVar(PathTracker.ctx.mkMul(left_var, right_var));
+                v = new MyVar(PathTracker.ctx.mkMul(left_var, right_var));
+                condInfo.put(v.z3var,
+                        new CondInfo(Kind.INT, operator, new MyVar(left_var, ""), new MyVar(right_var, "")));
+                return v;
             case "%":
-                return new MyVar(PathTracker.ctx.mkMod(left_var, right_var));
+                v = new MyVar(PathTracker.ctx.mkMod(left_var, right_var));
+                condInfo.put(v.z3var,
+                        new CondInfo(Kind.INT, operator, new MyVar(left_var, ""), new MyVar(right_var, "")));
+                return v;
             case "^":
-                return new MyVar(PathTracker.ctx.mkPower(left_var, right_var));
+                v = new MyVar(PathTracker.ctx.mkPower(left_var, right_var));
+                condInfo.put(v.z3var,
+                        new CondInfo(Kind.INT, operator, new MyVar(left_var, ""), new MyVar(right_var, "")));
+                return v;
             case "==":
-                return new MyVar(PathTracker.ctx.mkEq(left_var, right_var));
+                v = new MyVar(PathTracker.ctx.mkEq(left_var, right_var));
+                condInfo.put(v.z3var,
+                        new CondInfo(Kind.INT, operator, new MyVar(left_var, ""), new MyVar(right_var, "")));
+                return v;
             case "<=":
-                return new MyVar(PathTracker.ctx.mkLe(left_var, right_var));
+                v = new MyVar(PathTracker.ctx.mkLe(left_var, right_var));
+                condInfo.put(v.z3var,
+                        new CondInfo(Kind.INT, operator, new MyVar(left_var, ""), new MyVar(right_var, "")));
+                return v;
             case "<":
-                return new MyVar(PathTracker.ctx.mkLt(left_var, right_var));
+                v = new MyVar(PathTracker.ctx.mkLt(left_var, right_var));
+                condInfo.put(v.z3var,
+                        new CondInfo(Kind.INT, operator, new MyVar(left_var, ""), new MyVar(right_var, "")));
+                return v;
             case ">=":
-                return new MyVar(PathTracker.ctx.mkGe(left_var, right_var));
+                v = new MyVar(PathTracker.ctx.mkGe(left_var, right_var));
+                condInfo.put(v.z3var,
+                        new CondInfo(Kind.INT, operator, new MyVar(left_var, ""), new MyVar(right_var, "")));
+                return v;
             case ">":
-                return new MyVar(PathTracker.ctx.mkGt(left_var, right_var));
+                v = new MyVar(PathTracker.ctx.mkGt(left_var, right_var));
+                condInfo.put(v.z3var,
+                        new CondInfo(Kind.INT, operator, new MyVar(left_var, ""), new MyVar(right_var, "")));
+                return v;
             default:
-                System.out.println("Unknow Operator: " + operator);
+                System.out.println("Unknow Operator in IntExpres: " + operator);
                 System.exit(0);
-                return new MyVar(PathTracker.ctx.mkFalse());
+                v = new MyVar(PathTracker.ctx.mkFalse());
+                return v;
         }
+
     }
 
     static MyVar createStringExpr(SeqExpr left_var, SeqExpr right_var, String operator) {
         // We only support String.equals
+        MyVar v = null;
         if (operator.equals("==")) {
-            return new MyVar(PathTracker.ctx.mkEq(left_var, right_var));
+            v = new MyVar(PathTracker.ctx.mkEq(left_var, right_var));
+            condInfo.put(
+                    v.z3var,
+                    new CondInfo(
+                            Kind.STRING,
+                            operator,
+                            new MyVar(left_var, ""),
+                            new MyVar(right_var, "")));
+            return v;
         }
-        System.out.println("Unknow Operator: " + operator);
+        System.out.println("Unknow Operator in StringExprs: " + operator);
         System.exit(0);
         return null;
     }
@@ -170,6 +256,126 @@ public class ConcolicExecutionLab {
         // Set MyVar's z3var in same way as createVar function
         var.z3var = c.mkConst(c.mkSymbol(name + "_" + PathTracker.z3counter++), s);
         PathTracker.addToModel(c.mkEq(var.z3var, value));
+    }
+
+    static double rawBranchDistance(MyVar condition, boolean actualValue) {
+
+        CondInfo info = condInfo.get(condition.z3var);
+        if (info == null) {
+            return actualValue ? 0.0 : 1.0;
+        }
+
+        double raw;
+        switch (info.kind) {
+            case BOOL:
+                switch (info.op) {
+                    case "!":
+                        // unary negation: distance is zero if actualValue matches !operand
+                        boolean operand = Boolean.parseBoolean(info.left.z3var.getSExpr());
+                        raw = (actualValue == (!operand)) ? 0.0 : 1.0;
+                        break;
+                    case "&&":
+                    case "&":
+                        // to satisfy A && B, both must be true
+                        if (actualValue) {
+                            double d1 = rawBranchDistance(info.left, true);
+                            double d2 = rawBranchDistance(info.right, true);
+                            raw = d1 + d2;
+                        } else {
+                            // if the conjunction failed, pick the smaller distance to flipping either side
+                            double d1f = rawBranchDistance(info.left, false);
+                            double d2f = rawBranchDistance(info.right, false);
+                            raw = Math.min(d1f, d2f);
+                        }
+                        break;
+                    case "||":
+                    case "|":
+                        // to satisfy A || B, at least one must be true
+                        if (actualValue) {
+                            // if it succeeded, pick the smaller distance to making either side true
+                            double d1 = rawBranchDistance(info.left, true);
+                            double d2 = rawBranchDistance(info.right, true);
+                            raw = Math.min(d1, d2);
+                        } else {
+                            // if the disjunction failed (both false), sum their distances
+                            raw = rawBranchDistance(info.left, false)
+                                    + rawBranchDistance(info.right, false);
+                        }
+                        break;
+                    default:
+                        // fall back to simple boolean mismatch
+                        raw = actualValue ? 0.0 : 1.0;
+                }
+                break;
+
+            case INT: {
+                long l = Long.parseLong(info.left.z3var.getSExpr());
+                long r = Long.parseLong(info.right.z3var.getSExpr());
+                switch (info.op) {
+                    case "==":
+                        raw = actualValue ? 0.0 : Math.abs(l - r);
+                        break;
+                    case "!=":
+                        raw = actualValue ? 0.0 : (l == r ? 1.0 : 0.0);
+                        break;
+                    case "<":
+                        raw = actualValue ? 0.0 : Math.max(0, l - r + 1);
+                        break;
+                    case "<=":
+                        raw = actualValue ? 0.0 : Math.max(0, l - r);
+                        break;
+                    case ">":
+                        raw = actualValue ? 0.0 : Math.max(0, r - l + 1);
+                        break;
+                    case ">=":
+                        raw = actualValue ? 0.0 : Math.max(0, r - l);
+                        break;
+                    default:
+                        raw = 1.0;
+                }
+            }
+                break;
+
+            case STRING: {
+                String ls = info.left.z3var.toString().replaceAll("^\"|\"$", "");
+                String rs = info.right.z3var.toString().replaceAll("^\"|\"$", "");
+                if (info.op.equals("equals") || info.op.equals("==")) {
+                    raw = actualValue ? 0.0 : editDistance(ls, rs);
+                } else {
+                    raw = 1.0;
+                }
+            }
+                break;
+
+            default:
+                raw = actualValue ? 0.0 : 1.0;
+        }
+
+        // normalize into [0,1)
+        return raw / (raw + 1.0);
+    }
+
+    static int editDistance(String str1, String str2) {
+        int m = str1.length();
+        int n = str2.length();
+        int[][] dp = new int[m + 1][n + 1];
+        for (int i = 0; i <= m; i++) {
+            for (int j = 0; j <= n; j++) {
+                if (i == 0) {
+                    dp[i][j] = j;
+                } else if (j == 0) {
+                    dp[i][j] = i;
+                } else if (str1.charAt(i - 1) == str2.charAt(j - 1)) {
+                    dp[i][j] = dp[i - 1][j - 1];
+                } else {
+                    dp[i][j] = 1 + Math.min(
+                            Math.min(dp[i][j - 1],
+                                    dp[i - 1][j]),
+                            dp[i - 1][j - 1]);
+                }
+            }
+        }
+        return dp[m][n];
     }
 
     static void encounteredNewBranch(MyVar condition, boolean value, int line_nr) {
@@ -183,7 +389,8 @@ public class ConcolicExecutionLab {
         // System.out.println("Actual Condition Value: "+currentValue.getSExpr());
         if (!satBranches.contains(flipKey) && !visitedBranches.contains(flipKey)) {
             BoolExpr flippedCondition = value ? c.mkFalse() : c.mkTrue();
-            // System.out.println("Flipped Condition Value: " + flippedCondition.getSExpr());
+            // System.out.println("Flipped Condition Value: " +
+            // flippedCondition.getSExpr());
             PathTracker.solver.push();
             PathTracker.solver.add(flippedCondition);
             // Step 3: Try to find a satisfying model
@@ -195,6 +402,7 @@ public class ConcolicExecutionLab {
                     newInputs.add(model.evaluate(inputVar.z3var, true).toString());
                 }
                 satBranches.add(flipKey);
+                distance = rawBranchDistance(condition, !value);
                 ConcolicExecutionLab.newSatisfiableInput(newInputs);
             } else {
                 System.out.println("Unsatisfiable Value Found!");
@@ -217,7 +425,7 @@ public class ConcolicExecutionLab {
 
         System.out.println("Trimmed new inputs: " + trimmed_new_inputs);
 
-        pendingInputs.add(new PrioritizedInput(trimmed_new_inputs, currentDepth));
+        pendingInputs.add(new PrioritizedInput(trimmed_new_inputs, currentDepth, distance));
         // System.out.println("Input trace queue size: " + pendingInputs.size());
         // noImprove = 0; TODO: check this
         branchCount++;
@@ -254,44 +462,58 @@ public class ConcolicExecutionLab {
         return trace;
     }
 
+    static List<String> padCurrentTrace(List<String> new_trace) {
+        int missing = traceLength - new_trace.size();
+        Random rnd = new Random();
+        return Stream
+                .concat(
+                        new_trace.stream(),
+                        Stream.generate(() -> PathTracker.inputSymbols[rnd.nextInt(PathTracker.inputSymbols.length)])
+                                .limit(missing))
+                .collect(Collectors.toCollection(ArrayList::new));
+    }
+
     static void run() {
         initialize(PathTracker.inputSymbols);
         long startTime = System.currentTimeMillis();
         long deadline = startTime + TIME_BUDGET_MS;
         double epsilon = 0.25;
         double decay = 0.9995;
-        double epsilon_min = 0.05;
+        double epsilon_min = 0.20;
 
         // Place here your code to guide your fuzzer with its search using Concolic
         // Execution.
         while (System.currentTimeMillis() < deadline) {
             currentDepth = 0;
-            boolean explore = Math.random() < epsilon || pendingInputs.isEmpty();
+            boolean explore = Math.random() < epsilon && pendingInputs.isEmpty();
 
             try {
                 if (explore) {
                     currentTrace = generateRandomTrace(PathTracker.inputSymbols);
                     noImprove++;
+                    PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
 
                 } else {
                     List<String> nextSolverInput = pendingInputs.poll().input;
                     System.out.println("Input: " + nextSolverInput);
                     currentTrace = nextSolverInput;
                     noImprove = 0;
+                    PathTracker.runNextFuzzedSequence(padCurrentTrace(currentTrace).toArray(new String[0]));
 
                 }
-                PathTracker.reset();
-                PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
+                
                 if (noImprove >= RESTART_THRESHOLD) {
                     noImprove = 0;
                     epsilon = 1.0;
-                    traceLength = Math.min(MAX_TRACE_LENGTH, traceLength + 1);
+                    traceLength = Math.min(MAX_TRACE_LENGTH, traceLength + 5);
                     currentTrace = generateRandomTrace(PathTracker.inputSymbols);
+                    PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
                     System.out.println("→ random restart (new length = " + traceLength + ")");
                 }
                 if (epsilon > epsilon_min) {
                     epsilon = Math.max(epsilon_min, epsilon * decay);
                 }
+                PathTracker.reset();
 
             } catch (Exception e) {
                 e.printStackTrace();
