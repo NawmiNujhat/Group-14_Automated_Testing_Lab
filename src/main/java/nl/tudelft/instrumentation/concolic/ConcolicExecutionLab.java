@@ -25,20 +25,22 @@ public class ConcolicExecutionLab {
     static int noImprove = 0;
     static Set<String> discoveredErrorCodes = new HashSet<>();
     static Set<String> visitedBranches = new HashSet<>();
-    static Queue<Node> input_trace_queue = new LinkedList<Node>();
     static Set<String> pathConstraints = new HashSet<>();
     static Set<String> satBranches = new HashSet<>();
     static Set<String> unsatBranches = new HashSet<>();
+    private static PriorityQueue<PrioritizedInput> pendingInputs = new PriorityQueue<>(Comparator.<PrioritizedInput>comparingInt(p -> -p.depth));
 
     static final int TIME_BUDGET_MS = 5 * 60 * 1000;
     static final int RESTART_THRESHOLD = 15;
     static final int MAX_TRACE_LENGTH = 50;
 
-    static class Node {
-        List<String> element;
+    static class PrioritizedInput {
+        List<String> input;
+        int depth;
 
-        Node(List<String> el) {
-            this.element = el;
+        PrioritizedInput(List<String> input, int depth) {
+            this.input = input;
+            this.depth = depth;
         }
     }
 
@@ -175,7 +177,7 @@ public class ConcolicExecutionLab {
         PathTracker.solver.add(flippedCondition);
 
         // Step 3: Try to find a satisfying model
-        if ( PathTracker.solver.check() == Status.SATISFIABLE) {
+        if (PathTracker.solver.check() == Status.SATISFIABLE) {
             System.out.println("Found Satisfiable: ");
             Model model =  PathTracker.solver.getModel();
             LinkedList<String> newInputs = new LinkedList<>();
@@ -186,7 +188,7 @@ public class ConcolicExecutionLab {
             ConcolicExecutionLab.newSatisfiableInput(newInputs);
         }
         else{
-            System.out.println("Unsatidfiable Value Found!");
+            // System.out.println("Unsatidfiable Value Found!");
             unsatBranches.add(flipKey);
         }
 
@@ -203,10 +205,11 @@ public class ConcolicExecutionLab {
                 .map(s -> s.replaceAll("\"", ""))
                 .collect(Collectors.toList());
 
-        // TODO: Check if currentDepth needs to be stored along side for priority?? BFS
-        // right?
-        input_trace_queue.add(new Node(trimmed_new_inputs));
-        System.out.println("Input trace queue size: " + input_trace_queue.size());
+        System.out.println("Trimmed new inputs: " + trimmed_new_inputs);
+
+        pendingInputs.add(new PrioritizedInput(trimmed_new_inputs, currentDepth));
+        // System.out.println("Input trace queue size: " + pendingInputs.size());
+        // noImprove = 0; TODO: check this
         branchCount++;
     }
 
@@ -251,17 +254,17 @@ public class ConcolicExecutionLab {
             currentDepth = 0;
 
             try {
-                if (!input_trace_queue.isEmpty()) {
-                    Node el = input_trace_queue.poll();
+                if (!pendingInputs.isEmpty()) {
+                    List<String> nextSolverInput = pendingInputs.poll().input;
 
-                    System.out.println("Element: " + el.element);
-                    currentTrace = el.element;
+                    // System.out.println("Input: " + nextSolverInput);
+                    currentTrace = nextSolverInput;
                     PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
                 } else {
                     noImprove++;
                     if (noImprove >= RESTART_THRESHOLD) {
                         noImprove = 0;
-                        traceLength = Math.min(MAX_TRACE_LENGTH, traceLength + 1);
+                        traceLength = Math.min(MAX_TRACE_LENGTH, traceLength + 5);
 
                         // Restart from random trace
                         currentTrace = generateRandomTrace(PathTracker.inputSymbols);
@@ -271,6 +274,11 @@ public class ConcolicExecutionLab {
             } catch (Exception e) {
                 e.printStackTrace();
             }
+
+            System.out.println("trace length: " + traceLength);
+            System.out.println("Input trace queue size: " + pendingInputs.size());
+            System.out.println("Current known branches: " + branchCount);
+            PathTracker.reset();
         }
 
         System.out.println("Run completed.");
@@ -302,8 +310,8 @@ public class ConcolicExecutionLab {
                     .collect(Collectors.joining("|"));
 
             writer.write(visitedBranches.size() + ","
-                    + discoveredErrorCodes.size() + ","
-                    + errorCodesJoined);
+                            + discoveredErrorCodes.size() + ","
+                            + errorCodesJoined + "\n");
 
             System.out.println("Results written to " + fileName);
         } catch (IOException e) {
