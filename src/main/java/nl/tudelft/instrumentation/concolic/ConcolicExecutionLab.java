@@ -2,9 +2,12 @@ package nl.tudelft.instrumentation.concolic;
 
 import java.io.FileWriter;
 import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
-
+import java.util.stream.Stream;
+import java.util.Map.Entry;
 import com.microsoft.z3.*;
 
 import nl.tudelft.instrumentation.fuzzing.DistanceTracker;
@@ -18,21 +21,25 @@ import nl.tudelft.instrumentation.fuzzing.DistanceTracker;
 public class ConcolicExecutionLab {
 
     static Random r = new Random();
+    static Instant start = Instant.now();
     static List<String> currentTrace;
     static int traceLength = 10;
     static int currentDepth = 0;
     static int branchCount = 0;
     static int noImprove = 0;
+    static Boolean isFinished = false;
     static Set<String> discoveredErrorCodes = new HashSet<>();
     static Set<String> visitedBranches = new HashSet<>();
-    static Set<String> pathConstraints = new HashSet<>();
     static Set<String> satBranches = new HashSet<>();
     static Set<String> unsatBranches = new HashSet<>();
+    static Set<Entry<Boolean, Integer>> known_branches = new HashSet<>();
+    static Set<Entry<Boolean, Integer>> will_solve_branches = new HashSet<>();
     private static PriorityQueue<PrioritizedInput> pendingInputs = new PriorityQueue<>(Comparator.<PrioritizedInput>comparingInt(p -> -p.depth));
 
     static final int TIME_BUDGET_MS = 5 * 60 * 1000;
-    static final int RESTART_THRESHOLD = 15;
-    static final int MAX_TRACE_LENGTH = 50;
+    static final int RESTART_THRESHOLD = 10;
+    static final int MAX_TRACE_LENGTH = 100;
+    static final double RESTART_PROBABILITY = 0.1;
 
     static class PrioritizedInput {
         List<String> input;
@@ -162,39 +169,40 @@ public class ConcolicExecutionLab {
         String takenKey = line_nr + ":" + value;
         String flipKey = line_nr + ":" + !value;
         visitedBranches.add(takenKey);
-        pathConstraints.remove(takenKey);
-        if (satBranches.contains(flipKey) || visitedBranches.contains(flipKey)) {
-            return;
-        }
+        satBranches.remove(takenKey);
 
         // Call the solver
         Context c = PathTracker.ctx;
+
         // Negate the current condition
         BoolExpr currentValue = value ? c.mkTrue() : c.mkFalse();
-        BoolExpr flippedCondition = c.mkNot(currentValue);
+        BoolExpr flippedCondition = value ? c.mkFalse() : c.mkTrue();
 
-        PathTracker.solver.push();
-        PathTracker.solver.add(flippedCondition);
+        if (!satBranches.contains(flipKey) && !visitedBranches.contains(flipKey)) {
+            PathTracker.solver.push();
+            PathTracker.solver.add(c.mkEq(condition.z3var, flippedCondition));
 
-        // Step 3: Try to find a satisfying model
-        if (PathTracker.solver.check() == Status.SATISFIABLE) {
-            System.out.println("Found Satisfiable: ");
-            Model model =  PathTracker.solver.getModel();
-            LinkedList<String> newInputs = new LinkedList<>();
-            for (MyVar inputVar : PathTracker.inputs) {
-                newInputs.add(model.evaluate(inputVar.z3var, true).toString());
+            // Step 3: Try to find a satisfying model
+            if (PathTracker.solver.check() == Status.SATISFIABLE) {
+                System.out.println("Found Satisfiable: ");
+                satBranches.add(flipKey);
+                Model model =  PathTracker.solver.getModel();
+                LinkedList<String> newInputs = new LinkedList<>();
+                for (MyVar inputVar : PathTracker.inputs) {
+                    newInputs.add(model.evaluate(inputVar.z3var, true).toString());
+                }
+                ConcolicExecutionLab.newSatisfiableInput(newInputs);
             }
-            satBranches.add(flipKey);
-            ConcolicExecutionLab.newSatisfiableInput(newInputs);
-        }
-        else{
-            // System.out.println("Unsatidfiable Value Found!");
-            unsatBranches.add(flipKey);
+            else{
+                // System.out.println("Unsatidfiable Value Found!");
+                unsatBranches.add(flipKey);
+            }
+
+            PathTracker.solver.pop();
         }
 
         currentDepth++;
-        PathTracker.solver.pop();
-        PathTracker.addToBranches(c.mkEq(condition.z3var,currentValue));
+        PathTracker.addToBranches(c.mkEq(condition.z3var, currentValue));
     }
 
     static void newSatisfiableInput(LinkedList<String> new_inputs) {
@@ -204,8 +212,6 @@ public class ConcolicExecutionLab {
         List<String> trimmed_new_inputs = new_inputs.stream()
                 .map(s -> s.replaceAll("\"", ""))
                 .collect(Collectors.toList());
-
-        System.out.println("Trimmed new inputs: " + trimmed_new_inputs);
 
         pendingInputs.add(new PrioritizedInput(trimmed_new_inputs, currentDepth));
         // System.out.println("Input trace queue size: " + pendingInputs.size());
@@ -248,42 +254,43 @@ public class ConcolicExecutionLab {
         initialize(PathTracker.inputSymbols);
         long deadline = System.currentTimeMillis() + TIME_BUDGET_MS;
 
-        // Place here your code to guide your fuzzer with its search using Concolic
-        // Execution.
-        while (System.currentTimeMillis() < deadline) {
+        while (System.currentTimeMillis() <= deadline) {
             currentDepth = 0;
 
             try {
-                if (!pendingInputs.isEmpty()) {
-                    List<String> nextSolverInput = pendingInputs.poll().input;
-
-                    // System.out.println("Input: " + nextSolverInput);
-                    currentTrace = nextSolverInput;
-                    PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
-                } else {
-                    noImprove++;
-                    if (noImprove >= RESTART_THRESHOLD) {
-                        noImprove = 0;
-                        traceLength = Math.min(MAX_TRACE_LENGTH, traceLength + 5);
-
-                        // Restart from random trace
-                        currentTrace = generateRandomTrace(PathTracker.inputSymbols);
+                if (r.nextDouble() < RESTART_PROBABILITY) {
+                    if (!pendingInputs.isEmpty()) {
+                        List<String> nextSolverInput = pendingInputs.poll().input;
+                        List<String> fullLengthTrace = Stream.concat(
+                            nextSolverInput.stream(),
+                            Stream.generate(() -> PathTracker.inputSymbols[r.nextInt(PathTracker.inputSymbols.length)])
+                                .limit(traceLength - nextSolverInput.size())
+                        ).collect(Collectors.toList());
+                        System.out.println("Trace: " + fullLengthTrace);
+                        PathTracker.runNextFuzzedSequence(fullLengthTrace.toArray(new String[0]));
+                    } else {
+                        noImprove++;
+                        if(noImprove >= RESTART_THRESHOLD) {
+                            noImprove = 0;
+                            traceLength = Math.min(MAX_TRACE_LENGTH, traceLength + 5);
+                        }
+                        PathTracker.runNextFuzzedSequence(generateRandomTrace(PathTracker.inputSymbols).toArray(new String[0]));
                     }
-                    PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
+                } else {
+                    PathTracker.runNextFuzzedSequence(generateRandomTrace(PathTracker.inputSymbols).toArray(new String[0]));
                 }
-            } catch (Exception e) {
+            }
+            catch(Exception e) {
                 e.printStackTrace();
             }
 
-            System.out.println("trace length: " + traceLength);
-            System.out.println("Input trace queue size: " + pendingInputs.size());
-            System.out.println("Current known branches: " + branchCount);
+            System.out.println("Input trace length: " + traceLength);
+            System.out.println("Pending inputs size: " + pendingInputs.size());
+            System.out.println("Visited branches: " + visitedBranches.size());
             PathTracker.reset();
         }
 
-        System.out.println("Run completed.");
-
-        // Finished, write results to csv
+        // Finished, write to csv
         exportResultsToCSV();
     }
 
