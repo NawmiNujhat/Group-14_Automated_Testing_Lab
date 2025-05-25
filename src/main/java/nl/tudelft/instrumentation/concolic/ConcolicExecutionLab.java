@@ -2,6 +2,7 @@ package nl.tudelft.instrumentation.concolic;
 
 import java.io.FileWriter;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -28,8 +29,9 @@ public class ConcolicExecutionLab {
     static Set<String> pathConstraints = new HashSet<>();
     static Set<String> satBranches = new HashSet<>();
     static Set<String> unsatBranches = new HashSet<>();
-    private static PriorityQueue<PrioritizedInput> pendingInputs = new PriorityQueue<>(Comparator.<PrioritizedInput>comparingInt(p -> -p.depth));
-
+    private static PriorityQueue<PrioritizedInput> pendingInputs = new PriorityQueue<>(
+            Comparator.<PrioritizedInput>comparingInt(p -> -p.depth));
+    static final double RESTART_PROBABILITY = 0.05;
     static final int TIME_BUDGET_MS = 5 * 60 * 1000;
     static final int RESTART_THRESHOLD = 15;
     static final int MAX_TRACE_LENGTH = 50;
@@ -46,6 +48,11 @@ public class ConcolicExecutionLab {
 
     static void initialize(String[] inputSymbols) {
         // Initialise a random trace from the input symbols of the problem.
+        visitedBranches.clear();
+        unsatBranches.clear();
+        satBranches.clear();
+        pendingInputs.clear();
+        branchCount = 0;
         currentTrace = generateRandomTrace(inputSymbols);
     }
 
@@ -69,7 +76,7 @@ public class ConcolicExecutionLab {
         Expr z3var = c.mkConst(c.mkSymbol(name + "_" + PathTracker.z3counter++), s); // creating z3var, from createVar
                                                                                      // function above
         MyVar inputVariable = new MyVar(z3var);
-        PathTracker.inputs.add(inputVariable);
+
         // The following code is to add an additional constraint on the input variable.
         // The input variable must have a value that is equal to one of the input
         // symbols.
@@ -79,6 +86,7 @@ public class ConcolicExecutionLab {
         }
 
         PathTracker.addToModel(constraint);
+        PathTracker.inputs.add(inputVariable);
         // TODO: check if input needs to be stored anywhere
         return inputVariable;
     }
@@ -98,7 +106,9 @@ public class ConcolicExecutionLab {
             case "||":
                 return new MyVar(PathTracker.ctx.mkOr(left_var, right_var));
             default:
-                throw new IllegalArgumentException("Unknown operator: " + operator);
+                System.out.println("Unknow Operator: " + operator);
+                System.exit(0);
+                return new MyVar(PathTracker.ctx.mkFalse());
         }
     }
 
@@ -138,7 +148,9 @@ public class ConcolicExecutionLab {
             case ">":
                 return new MyVar(PathTracker.ctx.mkGt(left_var, right_var));
             default:
-                throw new IllegalArgumentException("Unknown operator: " + operator);
+                System.out.println("Unknow Operator: " + operator);
+                System.exit(0);
+                return new MyVar(PathTracker.ctx.mkFalse());
         }
     }
 
@@ -147,7 +159,9 @@ public class ConcolicExecutionLab {
         if (operator.equals("==")) {
             return new MyVar(PathTracker.ctx.mkEq(left_var, right_var));
         }
-        throw new IllegalArgumentException("Unknown operator: " + operator);
+        System.out.println("Unknow Operator: " + operator);
+        System.exit(0);
+        return null;
     }
 
     static void assign(MyVar var, String name, Expr value, Sort s) {
@@ -159,42 +173,38 @@ public class ConcolicExecutionLab {
     }
 
     static void encounteredNewBranch(MyVar condition, boolean value, int line_nr) {
+
+        Context c = PathTracker.ctx;
         String takenKey = line_nr + ":" + value;
         String flipKey = line_nr + ":" + !value;
         visitedBranches.add(takenKey);
-        pathConstraints.remove(takenKey);
-        if (satBranches.contains(flipKey) || visitedBranches.contains(flipKey)) {
-            return;
-        }
-
-        // Call the solver
-        Context c = PathTracker.ctx;
-        // Negate the current condition
+        satBranches.remove(takenKey);
         BoolExpr currentValue = value ? c.mkTrue() : c.mkFalse();
-        BoolExpr flippedCondition = c.mkNot(currentValue);
-
-        PathTracker.solver.push();
-        PathTracker.solver.add(flippedCondition);
-
-        // Step 3: Try to find a satisfying model
-        if (PathTracker.solver.check() == Status.SATISFIABLE) {
-            System.out.println("Found Satisfiable: ");
-            Model model =  PathTracker.solver.getModel();
-            LinkedList<String> newInputs = new LinkedList<>();
-            for (MyVar inputVar : PathTracker.inputs) {
-                newInputs.add(model.evaluate(inputVar.z3var, true).toString());
+        // System.out.println("Actual Condition Value: "+currentValue.getSExpr());
+        if (!satBranches.contains(flipKey) && !visitedBranches.contains(flipKey)) {
+            BoolExpr flippedCondition = value ? c.mkFalse() : c.mkTrue();
+            // System.out.println("Flipped Condition Value: " + flippedCondition.getSExpr());
+            PathTracker.solver.push();
+            PathTracker.solver.add(flippedCondition);
+            // Step 3: Try to find a satisfying model
+            if (PathTracker.solver.check() == Status.SATISFIABLE) {
+                System.out.println("Found Satisfiable: ");
+                Model model = PathTracker.solver.getModel();
+                LinkedList<String> newInputs = new LinkedList<>();
+                for (MyVar inputVar : PathTracker.inputs) {
+                    newInputs.add(model.evaluate(inputVar.z3var, true).toString());
+                }
+                satBranches.add(flipKey);
+                ConcolicExecutionLab.newSatisfiableInput(newInputs);
+            } else {
+                System.out.println("Unsatisfiable Value Found!");
+                unsatBranches.add(flipKey);
             }
-            satBranches.add(flipKey);
-            ConcolicExecutionLab.newSatisfiableInput(newInputs);
-        }
-        else{
-            // System.out.println("Unsatidfiable Value Found!");
-            unsatBranches.add(flipKey);
-        }
+            PathTracker.solver.pop();
 
+        }
+        PathTracker.addToBranches(c.mkEq(condition.z3var, currentValue));
         currentDepth++;
-        PathTracker.solver.pop();
-        PathTracker.addToBranches(c.mkEq(condition.z3var,currentValue));
     }
 
     static void newSatisfiableInput(LinkedList<String> new_inputs) {
@@ -246,31 +256,43 @@ public class ConcolicExecutionLab {
 
     static void run() {
         initialize(PathTracker.inputSymbols);
-        long deadline = System.currentTimeMillis() + TIME_BUDGET_MS;
+        long startTime = System.currentTimeMillis();
+        long deadline = startTime + TIME_BUDGET_MS;
+        double epsilon = 0.25;
+        double decay = 0.9995;
+        double epsilon_min = 0.05;
 
         // Place here your code to guide your fuzzer with its search using Concolic
         // Execution.
         while (System.currentTimeMillis() < deadline) {
             currentDepth = 0;
+            boolean explore = Math.random() < epsilon || pendingInputs.isEmpty();
 
             try {
-                if (!pendingInputs.isEmpty()) {
-                    List<String> nextSolverInput = pendingInputs.poll().input;
-
-                    // System.out.println("Input: " + nextSolverInput);
-                    currentTrace = nextSolverInput;
-                    PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
-                } else {
+                if (explore) {
+                    currentTrace = generateRandomTrace(PathTracker.inputSymbols);
                     noImprove++;
-                    if (noImprove >= RESTART_THRESHOLD) {
-                        noImprove = 0;
-                        traceLength = Math.min(MAX_TRACE_LENGTH, traceLength + 5);
 
-                        // Restart from random trace
-                        currentTrace = generateRandomTrace(PathTracker.inputSymbols);
-                    }
-                    PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
+                } else {
+                    List<String> nextSolverInput = pendingInputs.poll().input;
+                    System.out.println("Input: " + nextSolverInput);
+                    currentTrace = nextSolverInput;
+                    noImprove = 0;
+
                 }
+                PathTracker.reset();
+                PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
+                if (noImprove >= RESTART_THRESHOLD) {
+                    noImprove = 0;
+                    epsilon = 1.0;
+                    traceLength = Math.min(MAX_TRACE_LENGTH, traceLength + 1);
+                    currentTrace = generateRandomTrace(PathTracker.inputSymbols);
+                    System.out.println("→ random restart (new length = " + traceLength + ")");
+                }
+                if (epsilon > epsilon_min) {
+                    epsilon = Math.max(epsilon_min, epsilon * decay);
+                }
+
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -278,7 +300,11 @@ public class ConcolicExecutionLab {
             System.out.println("trace length: " + traceLength);
             System.out.println("Input trace queue size: " + pendingInputs.size());
             System.out.println("Current known branches: " + branchCount);
+            System.out.println("Visited Branches: " + visitedBranches.size());
             PathTracker.reset();
+            // satBranches.clear();
+            // unsatBranches.clear();
+            // pendingInputs.clear();
         }
 
         System.out.println("Run completed.");
@@ -310,8 +336,8 @@ public class ConcolicExecutionLab {
                     .collect(Collectors.joining("|"));
 
             writer.write(visitedBranches.size() + ","
-                            + discoveredErrorCodes.size() + ","
-                            + errorCodesJoined + "\n");
+                    + discoveredErrorCodes.size() + ","
+                    + errorCodesJoined + "\n");
 
             System.out.println("Results written to " + fileName);
         } catch (IOException e) {
