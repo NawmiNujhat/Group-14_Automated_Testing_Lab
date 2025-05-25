@@ -39,7 +39,6 @@ public class ConcolicExecutionLab {
     static final int TIME_BUDGET_MS = 5 * 60 * 1000;
     static final int RESTART_THRESHOLD = 10;
     static final int MAX_TRACE_LENGTH = 100;
-    static final double RESTART_PROBABILITY = 0.1;
 
     static class PrioritizedInput {
         List<String> input;
@@ -250,15 +249,33 @@ public class ConcolicExecutionLab {
         return trace;
     }
 
+    /**
+     * Computes a restart probability based on time progress.
+     *
+     * @param t                Time elapsed since the start of the run (in seconds)
+     * @return                 Restart probability (between 0.05 and 0.9)
+     */
+    static double computeRestartProbability(long t) {
+        // Time-based decay 
+        double initialTimeProb = 0.9;
+        double minTimeProb = 0.2;
+        double decayConstant = 60.0; 
+
+        return minTimeProb + (initialTimeProb - minTimeProb) * Math.exp(-t / decayConstant);
+    }
+
+
     static void run() {
         initialize(PathTracker.inputSymbols);
+        long startTime = System.currentTimeMillis();
         long deadline = System.currentTimeMillis() + TIME_BUDGET_MS;
 
         while (System.currentTimeMillis() <= deadline) {
             currentDepth = 0;
+            double restartProbability = computeRestartProbability(startTime);
 
             try {
-                if (r.nextDouble() < RESTART_PROBABILITY) {
+                if (r.nextDouble() < restartProbability) {
                     if (!pendingInputs.isEmpty()) {
                         List<String> nextSolverInput = pendingInputs.poll().input;
                         List<String> fullLengthTrace = Stream.concat(
