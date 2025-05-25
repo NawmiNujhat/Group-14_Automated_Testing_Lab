@@ -12,7 +12,8 @@ import nl.tudelft.instrumentation.fuzzing.DistanceTracker;
 /**
  * You should write your solution using this class.
  * 
- * Z3 API: https://z3prover.github.io/api/html/classcom_1_1microsoft_1_1z3_1_1_context.html
+ * Z3 API:
+ * https://z3prover.github.io/api/html/classcom_1_1microsoft_1_1z3_1_1_context.html
  */
 public class ConcolicExecutionLab {
 
@@ -23,8 +24,11 @@ public class ConcolicExecutionLab {
     static int branchCount = 0;
     static int noImprove = 0;
     static Set<String> discoveredErrorCodes = new HashSet<>();
-    static Set<Integer> visitedBranches = new HashSet<>();
+    static Set<String> visitedBranches = new HashSet<>();
     static Queue<Node> input_trace_queue = new LinkedList<Node>();
+    static Set<String> pathConstraints = new HashSet<>();
+    static Set<String> satBranches = new HashSet<>();
+    static Set<String> unsatBranches = new HashSet<>();
 
     static final int TIME_BUDGET_MS = 5 * 60 * 1000;
     static final int RESTART_THRESHOLD = 15;
@@ -38,13 +42,12 @@ public class ConcolicExecutionLab {
         }
     }
 
-    static void initialize(String[] inputSymbols){
+    static void initialize(String[] inputSymbols) {
         // Initialise a random trace from the input symbols of the problem.
         currentTrace = generateRandomTrace(inputSymbols);
     }
-    
 
-    static MyVar createVar(String name, Expr value, Sort s){
+    static MyVar createVar(String name, Expr value, Sort s) {
         Context c = PathTracker.ctx;
         /**
          * Create var, assign value and add to path constraint.
@@ -57,17 +60,19 @@ public class ConcolicExecutionLab {
         return new MyVar(z3var, name);
     }
 
-    static MyVar createInput(String name, Expr value, Sort s){
+    static MyVar createInput(String name, Expr value, Sort s) {
         // Create an input var, these should be free variables!
         Context c = PathTracker.ctx;
 
-        Expr z3var = c.mkConst(c.mkSymbol(name + "_" + PathTracker.z3counter++), s); // creating z3var, from createVar function above
+        Expr z3var = c.mkConst(c.mkSymbol(name + "_" + PathTracker.z3counter++), s); // creating z3var, from createVar
+                                                                                     // function above
         MyVar inputVariable = new MyVar(z3var);
         PathTracker.inputs.add(inputVariable);
         // The following code is to add an additional constraint on the input variable.
-        // The input variable must have a value that is equal to one of the input symbols.
+        // The input variable must have a value that is equal to one of the input
+        // symbols.
         BoolExpr constraint = c.mkFalse();
-        for (String input: PathTracker.inputSymbols) {
+        for (String input : PathTracker.inputSymbols) {
             constraint = c.mkOr(c.mkEq(z3var, c.mkString(input)), constraint);
         }
 
@@ -76,12 +81,12 @@ public class ConcolicExecutionLab {
         return inputVariable;
     }
 
-    static MyVar createBoolExpr(BoolExpr var, String operator){
+    static MyVar createBoolExpr(BoolExpr var, String operator) {
         // Handle the following unary operators: !
         return new MyVar(PathTracker.ctx.mkNot(var));
     }
 
-    static MyVar createBoolExpr(BoolExpr left_var, BoolExpr right_var, String operator){
+    static MyVar createBoolExpr(BoolExpr left_var, BoolExpr right_var, String operator) {
         // Handle the following binary operators: &, &&, |, ||
         switch (operator) {
             case "&":
@@ -95,17 +100,18 @@ public class ConcolicExecutionLab {
         }
     }
 
-    static MyVar createIntExpr(IntExpr var, String operator){
+    static MyVar createIntExpr(IntExpr var, String operator) {
         // Handle the following unary operators for numerical operations: +, -
 
         // '+' just stays the same number, only handle '-'
-        if(operator.equals("-"))
+        if (operator.equals("-"))
             return new MyVar(PathTracker.ctx.mkSub(PathTracker.ctx.mkInt(0), var));
         return new MyVar(var);
     }
 
-    static MyVar createIntExpr(IntExpr left_var, IntExpr right_var, String operator){
-        // Handle the following binary operators for numerical operations: +, -, /, *, %, ^, ==, <=, <, >= and >
+    static MyVar createIntExpr(IntExpr left_var, IntExpr right_var, String operator) {
+        // Handle the following binary operators for numerical operations: +, -, /, *,
+        // %, ^, ==, <=, <, >= and >
         switch (operator) {
             case "+":
                 return new MyVar(PathTracker.ctx.mkAdd(left_var, right_var));
@@ -134,7 +140,7 @@ public class ConcolicExecutionLab {
         }
     }
 
-    static MyVar createStringExpr(SeqExpr left_var, SeqExpr right_var, String operator){
+    static MyVar createStringExpr(SeqExpr left_var, SeqExpr right_var, String operator) {
         // We only support String.equals
         if (operator.equals("==")) {
             return new MyVar(PathTracker.ctx.mkEq(left_var, right_var));
@@ -142,7 +148,7 @@ public class ConcolicExecutionLab {
         throw new IllegalArgumentException("Unknown operator: " + operator);
     }
 
-    static void assign(MyVar var, String name, Expr value, Sort s){
+    static void assign(MyVar var, String name, Expr value, Sort s) {
         // All variable assignments, use single static assignment
         Context c = PathTracker.ctx;
         // Set MyVar's z3var in same way as createVar function
@@ -150,44 +156,43 @@ public class ConcolicExecutionLab {
         PathTracker.addToModel(c.mkEq(var.z3var, value));
     }
 
-    static void encounteredNewBranch(MyVar condition, boolean value, int line_nr){
-        if (!visitedBranches.add(line_nr)) {
-            // Already visited this branch line, skip solving
-            // System.out.println("Already visited branch, skipped.");
+    static void encounteredNewBranch(MyVar condition, boolean value, int line_nr) {
+        String takenKey = line_nr + ":" + value;
+        String flipKey = line_nr + ":" + !value;
+        visitedBranches.add(takenKey);
+        pathConstraints.remove(takenKey);
+        if (satBranches.contains(flipKey) || visitedBranches.contains(flipKey)) {
             return;
         }
 
         // Call the solver
         Context c = PathTracker.ctx;
-        Solver solver = c.mkSolver();
-
         // Negate the current condition
         BoolExpr currentValue = value ? c.mkTrue() : c.mkFalse();
         BoolExpr flippedCondition = c.mkNot(currentValue);
 
-        solver.add(flippedCondition);
+        PathTracker.solver.push();
+        PathTracker.solver.add(flippedCondition);
 
         // Step 3: Try to find a satisfying model
-        if (solver.check() == Status.SATISFIABLE) {
+        if ( PathTracker.solver.check() == Status.SATISFIABLE) {
             System.out.println("Found Satisfiable: ");
-            Model model = solver.getModel();
+            Model model =  PathTracker.solver.getModel();
             LinkedList<String> newInputs = new LinkedList<>();
-
             for (MyVar inputVar : PathTracker.inputs) {
-                Expr valueExpr = model.eval(inputVar.z3var, true);
-                // Ensure we only extract the actual symbolic input variables
-                if (valueExpr != null && valueExpr.isString()) {
-                    newInputs.add(valueExpr.toString());
-                }
+                newInputs.add(model.evaluate(inputVar.z3var, true).toString());
             }
-
-            newSatisfiableInput(newInputs);
+            satBranches.add(flipKey);
+            ConcolicExecutionLab.newSatisfiableInput(newInputs);
+        }
+        else{
+            System.out.println("Unsatidfiable Value Found!");
+            unsatBranches.add(flipKey);
         }
 
         currentDepth++;
-
-        // Reset path constraint for next run
-        PathTracker.solver.reset();
+        PathTracker.solver.pop();
+        PathTracker.addToBranches(c.mkEq(condition.z3var,currentValue));
     }
 
     static void newSatisfiableInput(LinkedList<String> new_inputs) {
@@ -198,18 +203,20 @@ public class ConcolicExecutionLab {
                 .map(s -> s.replaceAll("\"", ""))
                 .collect(Collectors.toList());
 
-        // TODO: Check if currentDepth needs to be stored along side for priority?? BFS right?
-        input_trace_queue.add(new Node(trimmed_new_inputs)); 
+        // TODO: Check if currentDepth needs to be stored along side for priority?? BFS
+        // right?
+        input_trace_queue.add(new Node(trimmed_new_inputs));
         System.out.println("Input trace queue size: " + input_trace_queue.size());
         branchCount++;
     }
 
     /**
      * Method for fuzzing new inputs for a program.
+     * 
      * @param inputSymbols the inputSymbols to fuzz from.
      * @return a fuzzed sequence
      */
-    static List<String> fuzz(String[] inputSymbols){
+    static List<String> fuzz(String[] inputSymbols) {
         /*
          * Add here your code for fuzzing a new sequence for the RERS problem.
          * You can guide your fuzzer to fuzz "smart" input sequences to cover
@@ -222,6 +229,7 @@ public class ConcolicExecutionLab {
 
     /**
      * Generate a random trace from an array of symbols.
+     * 
      * @param symbols the symbols from which a trace should be generated from.
      * @return a random trace that is generated from the given symbols.
      */
@@ -236,9 +244,10 @@ public class ConcolicExecutionLab {
     static void run() {
         initialize(PathTracker.inputSymbols);
         long deadline = System.currentTimeMillis() + TIME_BUDGET_MS;
-        
-        // Place here your code to guide your fuzzer with its search using Concolic Execution.
-        while(System.currentTimeMillis() < deadline) {
+
+        // Place here your code to guide your fuzzer with its search using Concolic
+        // Execution.
+        while (System.currentTimeMillis() < deadline) {
             currentDepth = 0;
 
             try {
@@ -250,7 +259,7 @@ public class ConcolicExecutionLab {
                     PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
                 } else {
                     noImprove++;
-                    if(noImprove >= RESTART_THRESHOLD) {
+                    if (noImprove >= RESTART_THRESHOLD) {
                         noImprove = 0;
                         traceLength = Math.min(MAX_TRACE_LENGTH, traceLength + 1);
 
@@ -270,7 +279,7 @@ public class ConcolicExecutionLab {
         exportResultsToCSV();
     }
 
-    public static void output(String out){
+    public static void output(String out) {
         // System.out.println(out);
         if (out.contains("error_") || out.contains("Error")) {
             String error_code = out.replaceFirst("^Invalid input:\\s*", "");
@@ -283,18 +292,18 @@ public class ConcolicExecutionLab {
         boolean fileExists = new java.io.File(fileName).exists();
         try (FileWriter writer = new FileWriter(fileName, true)) {
             if (!fileExists) {
-                writer.write("# of Unique Branches, # of Unique Error Codes, Error Codes\n"); 
+                writer.write("# of Unique Branches, # of Unique Error Codes, Error Codes\n");
             }
 
             // Avoid comma issues
             String errorCodesJoined = discoveredErrorCodes.stream()
-                            .map(code -> code.replaceAll(".*?(\\d+)", "$1")) // Extract numeric part
-                            .sorted(Comparator.comparingInt(Integer::parseInt))
-                            .collect(Collectors.joining("|"));
+                    .map(code -> code.replaceAll(".*?(\\d+)", "$1")) // Extract numeric part
+                    .sorted(Comparator.comparingInt(Integer::parseInt))
+                    .collect(Collectors.joining("|"));
 
             writer.write(visitedBranches.size() + ","
-                            + discoveredErrorCodes.size() + ","
-                            + errorCodesJoined);
+                    + discoveredErrorCodes.size() + ","
+                    + errorCodesJoined);
 
             System.out.println("Results written to " + fileName);
         } catch (IOException e) {
