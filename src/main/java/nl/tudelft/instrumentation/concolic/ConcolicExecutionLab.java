@@ -30,12 +30,8 @@ public class ConcolicExecutionLab {
     static Set<String> pathConstraints = new HashSet<>();
     static Set<String> satBranches = new HashSet<>();
     static Set<String> unsatBranches = new HashSet<>();
-    private static PriorityQueue<PrioritizedInput> pendingInputs = new PriorityQueue<>((a, b) -> {
-        int d = Integer.compare(b.depth, a.depth);
-        if (d != 0)
-            return d;
-        return Double.compare(a.distance, b.distance);
-    });
+    private static PriorityQueue<PrioritizedInput> pendingInputs = new PriorityQueue<>(
+            Comparator.<PrioritizedInput>comparingInt(p -> -p.depth));
     static final double RESTART_PROBABILITY = 0.05;
     static final int TIME_BUDGET_MS = 5 * 60 * 1000;
     static final int RESTART_THRESHOLD = 20;
@@ -43,15 +39,16 @@ public class ConcolicExecutionLab {
     static double distance = 0.0;
     private static final Map<Expr, CondInfo> condInfo = new HashMap<>();
 
-    private static class PrioritizedInput {
+    private static class PrioritizedInput implements Comparable<PrioritizedInput>  {
         List<String> input;
         int depth;
-        double distance;
 
-        PrioritizedInput(List<String> input, int depth, double distance) {
+        PrioritizedInput(List<String> input, int depth) {
             this.input = input;
             this.depth = depth;
-            this.distance = distance;
+        }
+        @Override public int compareTo(PrioritizedInput other) {
+            return Integer.compare(this.depth, other.depth);
         }
     }
 
@@ -386,26 +383,22 @@ public class ConcolicExecutionLab {
         visitedBranches.add(takenKey);
         satBranches.remove(takenKey);
         BoolExpr currentValue = value ? c.mkTrue() : c.mkFalse();
-        // System.out.println("Actual Condition Value: "+currentValue.getSExpr());
         if (!satBranches.contains(flipKey) && !visitedBranches.contains(flipKey)) {
             BoolExpr flippedCondition = value ? c.mkFalse() : c.mkTrue();
-            // System.out.println("Flipped Condition Value: " +
-            // flippedCondition.getSExpr());
             PathTracker.solver.push();
             PathTracker.solver.add(flippedCondition);
             // Step 3: Try to find a satisfying model
             if (PathTracker.solver.check() == Status.SATISFIABLE) {
-                System.out.println("Found Satisfiable: ");
+                // System.out.println("Found Satisfiable: ");
                 Model model = PathTracker.solver.getModel();
                 LinkedList<String> newInputs = new LinkedList<>();
                 for (MyVar inputVar : PathTracker.inputs) {
                     newInputs.add(model.evaluate(inputVar.z3var, true).toString());
                 }
                 satBranches.add(flipKey);
-                distance = rawBranchDistance(condition, !value);
                 ConcolicExecutionLab.newSatisfiableInput(newInputs);
             } else {
-                System.out.println("Unsatisfiable Value Found!");
+                // System.out.println("Unsatisfiable Value Found!");
                 unsatBranches.add(flipKey);
             }
             PathTracker.solver.pop();
@@ -425,7 +418,7 @@ public class ConcolicExecutionLab {
 
         System.out.println("Trimmed new inputs: " + trimmed_new_inputs);
 
-        pendingInputs.add(new PrioritizedInput(trimmed_new_inputs, currentDepth, distance));
+        pendingInputs.add(new PrioritizedInput(trimmed_new_inputs, currentDepth));
         // System.out.println("Input trace queue size: " + pendingInputs.size());
         // noImprove = 0; TODO: check this
         branchCount++;
@@ -473,54 +466,62 @@ public class ConcolicExecutionLab {
                 .collect(Collectors.toCollection(ArrayList::new));
     }
 
+    static double computeEpsilonExp(Duration elapsed,
+            double epsilonStart,
+            double epsilonMin,
+            double halfLifeSeconds) {
+        // convert elapsed to seconds as a double
+        double t = elapsed.toMillis() / 1000.0;
+        // fraction = 2^(–t / halfLife)
+        double fraction = Math.pow(0.5, t / halfLifeSeconds);
+        return epsilonMin + (epsilonStart - epsilonMin) * fraction;
+    }
+
     static void run() {
         initialize(PathTracker.inputSymbols);
         long startTime = System.currentTimeMillis();
         long deadline = startTime + TIME_BUDGET_MS;
-        double epsilon = 0.25;
+        double totalSec = TIME_BUDGET_MS / 1000.0;
+        double epsilon=0.25;
+        double epsilonStart = 0.9;
         double decay = 0.9995;
         double epsilon_min = 0.05;
-        int lastBranchCount=0;
-
+        int lastBranchCount = 0;
+        double halfLife = totalSec / 3.0;
         // Place here your code to guide your fuzzer with its search using Concolic
         // Execution.
         while (System.currentTimeMillis() < deadline) {
             currentDepth = 0;
-            if (branchCount > lastBranchCount) { 
-                epsilon = Math.max(epsilon_min, epsilon * decay);
-                lastBranchCount = branchCount;
-            } else {
-                epsilon = Math.min(1.0, epsilon + 0.05);
-            }
-            boolean explore = Math.random() < epsilon && pendingInputs.isEmpty();
-
+            Duration elapsed = Duration.ofMillis(System.currentTimeMillis() - startTime);
+            epsilon = computeEpsilonExp(elapsed, epsilonStart, epsilon_min, halfLife);
+            // epsilon = 0.25 + (10 / (elapsed.getSeconds() + 10)) * 0.7;
             try {
-                if (explore) {
-                    currentTrace = generateRandomTrace(PathTracker.inputSymbols);
-                    noImprove++;
-                    PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
+                if (Math.random() >= epsilon) {
+                    if (!pendingInputs.isEmpty()) {
+                        List<String> nextSolverInput = pendingInputs.poll().input;
+                        System.out.println("Input: " + nextSolverInput);
+                        currentTrace = nextSolverInput;
+                        noImprove = 0;
+                        PathTracker.runNextFuzzedSequence(padCurrentTrace(currentTrace).toArray(new String[0]));
+
+                    } else {
+                        noImprove++;
+                        if (noImprove >= RESTART_THRESHOLD) {
+                            noImprove = 0;
+                            traceLength = Math.min(MAX_TRACE_LENGTH, traceLength + 5);
+
+                        }
+                        currentTrace = generateRandomTrace(PathTracker.inputSymbols);
+                        PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
+                        System.out.println("→ random restart (new length = " + traceLength + ")");
+
+                    }
 
                 } else {
-                    List<String> nextSolverInput = pendingInputs.poll().input;
-                    System.out.println("Input: " + nextSolverInput);
-                    currentTrace = nextSolverInput;
-                    noImprove = 0;
-                    PathTracker.runNextFuzzedSequence(padCurrentTrace(currentTrace).toArray(new String[0]));
 
-                }
-                
-                if (noImprove >= RESTART_THRESHOLD) {
-                    noImprove = 0;
-                    epsilon = 1.0;
-                    traceLength = Math.min(MAX_TRACE_LENGTH, traceLength + 5);
                     currentTrace = generateRandomTrace(PathTracker.inputSymbols);
                     PathTracker.runNextFuzzedSequence(currentTrace.toArray(new String[0]));
-                    System.out.println("→ random restart (new length = " + traceLength + ")");
                 }
-                if (epsilon > epsilon_min) {
-                    epsilon = Math.max(epsilon_min, epsilon * decay);
-                }
-                PathTracker.reset();
 
             } catch (Exception e) {
                 e.printStackTrace();
