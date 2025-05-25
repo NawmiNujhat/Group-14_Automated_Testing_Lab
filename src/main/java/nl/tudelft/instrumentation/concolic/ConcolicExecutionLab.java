@@ -21,7 +21,7 @@ import nl.tudelft.instrumentation.fuzzing.DistanceTracker;
 public class ConcolicExecutionLab {
 
     static Random r = new Random();
-    static Instant start = Instant.now();
+    static long startTime = System.currentTimeMillis();
     static List<String> currentTrace;
     static int traceLength = 10;
     static int currentDepth = 0;
@@ -29,6 +29,7 @@ public class ConcolicExecutionLab {
     static int noImprove = 0;
     static Boolean isFinished = false;
     static Set<String> discoveredErrorCodes = new HashSet<>();
+    static Set<String> errorCodeOutput = new HashSet<>();
     static Set<String> visitedBranches = new HashSet<>();
     static Set<String> satBranches = new HashSet<>();
     static Set<String> unsatBranches = new HashSet<>();
@@ -267,7 +268,6 @@ public class ConcolicExecutionLab {
 
     static void run() {
         initialize(PathTracker.inputSymbols);
-        long startTime = System.currentTimeMillis();
         long deadline = System.currentTimeMillis() + TIME_BUDGET_MS;
 
         while (System.currentTimeMillis() <= deadline) {
@@ -315,12 +315,18 @@ public class ConcolicExecutionLab {
         // System.out.println(out);
         if (out.contains("error_") || out.contains("Error")) {
             String error_code = out.replaceFirst("^Invalid input:\\s*", "");
+            long currentTimeElapsed = (System.currentTimeMillis() - startTime) / 1000;
+            if (!discoveredErrorCodes.contains(error_code)) {
+                errorCodeOutput.add(error_code.trim() + "(" + currentTimeElapsed + "s)");
+            }
+
             discoveredErrorCodes.add(error_code.trim());
         }
     }
 
     static void exportResultsToCSV() {
         String fileName = "concolic_results.csv";
+        String errorFileName = "concolic_errors.csv";
         boolean fileExists = new java.io.File(fileName).exists();
         try (FileWriter writer = new FileWriter(fileName, true)) {
             if (!fileExists) {
@@ -338,6 +344,18 @@ public class ConcolicExecutionLab {
                             + errorCodesJoined + "\n");
 
             System.out.println("Results written to " + fileName);
+        } catch (IOException e) {
+            System.err.println("Failed to write results to CSV: " + e.getMessage());
+        }
+
+        try (FileWriter writer = new FileWriter(errorFileName, true)) {
+            if (!fileExists) {
+                writer.write("Error Codes\n");
+            }
+
+            writer.write(errorCodeOutput.stream().collect(Collectors.joining("|")));
+
+            System.out.println("Results written to " + errorFileName);
         } catch (IOException e) {
             System.err.println("Failed to write results to CSV: " + e.getMessage());
         }
