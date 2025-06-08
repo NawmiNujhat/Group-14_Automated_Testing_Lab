@@ -27,7 +27,7 @@ public class PatchingLab {
         private static final int TOP_SUSPECTS = 5;
         private static final String[] NUMERIC_OPS = { ">", "<", ">=", "<=", "==", "!=" };
         private static final String[] BOOLEAN_OPS = { "==", "!=" };
-        static final int TIME_BUDGET_MS = 5 * 60 * 1000;
+        static final int TIME_BUDGET_MS = 30 * 60 * 1000;
 
         static final List<Integer> fitnessHistory = new ArrayList<>();
 
