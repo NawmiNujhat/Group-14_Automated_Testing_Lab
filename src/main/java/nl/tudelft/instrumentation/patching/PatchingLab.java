@@ -26,7 +26,7 @@ public class PatchingLab {
         private static final Random RNG = new Random();
         private static final int POP_SIZE = 50;
         private static final int MAX_GEN = 500;
-        private static final double BASE_MUT_P = 0.05;
+        private static final double BASE_MUT_P = 0.10;
         private static final int TOP_SUSPECTS = 5;
         private static final String[] NUMERIC_OPS = { ">", "<", ">=", "<=", "==", "!=" };
         private static final String[] BOOLEAN_OPS = { "==", "!=" };
@@ -41,18 +41,17 @@ public class PatchingLab {
         private static final double P_DELETE = 0.25;
         private static final double P_INSERT = 0.25;
         private static final double P_CHANGE = 0.25;
-        private static final int PROBLEM_ID = 15;
+        private static final int PROBLEM_ID = 7;
 
         private static double annealAdaptive(int generation, int currentBest) {
-                // track when we last saw an improvement
+
                 if (currentBest < prevBest) {
                         prevBest = currentBest;
                         lastImprovementGen = generation;
                 }
-                // base linear decay
-                double base = 0.30 - (0.29 * generation / (MAX_GEN - 1)); // from .30 → .01
 
-                // if stuck for too long, inject a “restart” spike
+                double base = 0.30 - (0.29 * generation / (MAX_GEN - 1));
+
                 int stuck = generation - lastImprovementGen;
                 if (stuck > STAGNATE_GENS) {
                         // ramp back to 30% then continue decay
@@ -61,9 +60,8 @@ public class PatchingLab {
                 }
                 return base;
         }
-      
+
         static String[] complexMutate(String[] parent) {
-                // work on a List so we can add/remove
                 List<String> genes = new ArrayList<>(Arrays.asList(parent));
                 double r = RNG.nextDouble();
 
@@ -76,7 +74,6 @@ public class PatchingLab {
                         }
 
                 } else if (r < P_SWAP + P_DELETE) {
-                        // 2) delete one random gene (if size > 1)
                         if (genes.size() > 1) {
                                 genes.remove(RNG.nextInt(genes.size()));
                         }
@@ -89,15 +86,11 @@ public class PatchingLab {
                         genes.add(pos, newOp);
 
                 } else {
-                        // 4) change one gene in place (your old randomAlt)
                         int i = RNG.nextInt(genes.size());
                         genes.set(i, randomAlt(genes.get(i)));
                 }
 
-                // if you really need a fixed length, you can now
-                // either truncate or pad back to parent.length:
                 while (genes.size() < parent.length) {
-                        // pad with a random pick
                         genes.add(randomAlt(originalOperators[RNG.nextInt(numOperators)]));
                 }
                 if (genes.size() > parent.length) {
@@ -286,7 +279,7 @@ public class PatchingLab {
                 // System.out.println("Entered run");
 
                 // Loop here, running your genetic algorithm until you think it is done
-                while (System.currentTimeMillis() < deadline && (!isFinished && generation<MAX_GEN)) {
+                while (System.currentTimeMillis() < deadline && (!isFinished && generation < MAX_GEN)) {
                         System.out.println("Generation: " + generation);
                         // Do things!
                         int genBest = Integer.MAX_VALUE;
@@ -302,7 +295,8 @@ public class PatchingLab {
                                         // Update best fit and store timestamp
                                         bestFit = fit;
                                         globalBest = ind.clone();
-                                        fitnessOverTime.put((int) (long) (System.currentTimeMillis() - start) / 1000, bestFit);
+                                        fitnessOverTime.put((int) (long) (System.currentTimeMillis() - start) / 1000,
+                                                        bestFit);
 
                                         if (bestFit == 0) {
                                                 isFinished = true;
@@ -332,12 +326,10 @@ public class PatchingLab {
 
                                 // uniform‐crossover then mutate
                                 String[] child = new String[numOperators];
+                                double mProb = 0.0;
                                 for (int i = 0; i < numOperators; i++) {
                                         // pick gene from mom or dad
                                         child[i] = RNG.nextBoolean() ? mom[i] : dad[i];
-
-                                        // mutation (boosted if in top suspects)
-
                                         boolean isHot = false;
                                         for (int j = 0; j < TOP_SUSPECTS; j++) {
 
@@ -347,11 +339,12 @@ public class PatchingLab {
                                                 }
 
                                         }
-                                        // double mProb = baseM + (isHot ? baseM * 2 : 0);
-                                        
+                                        mProb = baseM + (isHot ? baseM * 4 : 0);
 
                                 }
-                                child=complexMutate(child);
+                                if (RNG.nextDouble() < mProb) {
+                                        child = complexMutate(child);
+                                }
                                 nextPop.add(child);
                         }
 
@@ -365,13 +358,13 @@ public class PatchingLab {
                         if (!originalOperators[i].equals(globalBest[i]))
                                 System.out.printf("op[%d] %s → %s\n", i, originalOperators[i], globalBest[i]);
                 }
-                try (PrintWriter pw = new PrintWriter(new FileWriter(BEST_FIT_FILE,true))) {
+                try (PrintWriter pw = new PrintWriter(new FileWriter(BEST_FIT_FILE, true))) {
                         pw.printf("generation=%d,best_failing_tests=%d%n", generation, bestFit);
                         System.out.println("Best fitness written to " + new File(BEST_FIT_FILE).getAbsolutePath());
                 } catch (IOException ioe) {
                         System.err.println("[WARN] Could not write best_fitness file: " + ioe.getMessage());
                 }
-                try (PrintWriter out = new PrintWriter(new FileWriter("best_patch.txt",true))) {
+                try (PrintWriter out = new PrintWriter(new FileWriter("best_patch.txt", true))) {
                         for (int i = 0; i < numOperators; i++) {
                                 if (!originalOperators[i].equals(globalBest[i])) {
                                         out.printf("op[%d]  %s  →  %s%n",
@@ -397,7 +390,6 @@ public class PatchingLab {
                         System.err.println("Error writing to file: " + e.getMessage());
                 }
         }
-
 
         public static void output(String out) {
                 // This will get called when the problem code tries to print things,
