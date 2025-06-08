@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.stream.IntStream;
 
@@ -15,8 +16,10 @@ public class PatchingLab {
         static double[] tarantulaScore;
         static String[] originalOperators;
         private static final String BEST_FIT_FILE = "best_fitness.txt";
+        private static final String BEST_FIT_OVER_TIME_FILE = "best_fitness_over_time.csv";
         static int numField;
         static boolean[] execBitMap;
+        private static Map<Integer, Integer> fitnessOverTime = new HashMap<Integer, Integer>();
         private static int[] passCount;
         private static int[] failCount;
         private static int totalPass, totalFail;
@@ -38,6 +41,7 @@ public class PatchingLab {
         private static final double P_DELETE = 0.25;
         private static final double P_INSERT = 0.25;
         private static final double P_CHANGE = 0.25;
+        private static final int PROBLEM_ID = 11;
 
         private static double annealAdaptive(int generation, int currentBest) {
                 // track when we last saw an improvement
@@ -118,7 +122,7 @@ public class PatchingLab {
                 Arrays.fill(passCount, 0);
                 Arrays.fill(failCount, 0);
                 totalPass = totalFail = 0;
-                int nTests = OperatorTracker.runAllTests().size();
+                int nTests = OperatorTracker.tests.size();
                 int failing = 0;
                 for (int i = 0; i < nTests; i++) {
                         // System.out.println("Number of tests: " + nTests);
@@ -272,6 +276,7 @@ public class PatchingLab {
                 int bestFit = Integer.MAX_VALUE;
                 Random rand = RNG;
                 long deadline = System.currentTimeMillis() + TIME_BUDGET_MS;
+                long start = System.currentTimeMillis();
                 // Place the code here you want to run once:
                 // You want to change this of course, this is just an example
                 // Tests are loaded from resources/rers2020_test_cases. If you are you are using
@@ -281,7 +286,7 @@ public class PatchingLab {
                 // System.out.println("Entered run");
 
                 // Loop here, running your genetic algorithm until you think it is done
-                while (System.currentTimeMillis() < deadline ||(!isFinished && generation<MAX_GEN)) {
+                while (System.currentTimeMillis() < deadline && (!isFinished && generation<MAX_GEN)) {
                         System.out.println("Generation: " + generation);
                         // Do things!
                         int genBest = Integer.MAX_VALUE;
@@ -294,8 +299,10 @@ public class PatchingLab {
                                 genBest = Math.min(genBest, fit);
                                 System.out.println("Gen Best: " + genBest);
                                 if (fit < bestFit) {
+                                        // Update best fit and store timestamp
                                         bestFit = fit;
                                         globalBest = ind.clone();
+                                        fitnessOverTime.put((int) (long) (System.currentTimeMillis() - start) / 1000, bestFit);
 
                                         if (bestFit == 0) {
                                                 isFinished = true;
@@ -350,8 +357,8 @@ public class PatchingLab {
 
                         population = nextPop;
                         generation++;
-
                 }
+                System.out.println("Finished after: " + ((System.currentTimeMillis() - start) / 1000) + "s");
                 System.out.println("\n========== EA finished ==========");
                 System.out.printf("Generations: %d | Best failing tests: %d\n", generation, bestFit);
                 for (int i = 0; i < numOperators; i++) {
@@ -375,7 +382,22 @@ public class PatchingLab {
                         System.err.println("[WARN] Could not write best_patch file: " + ioe.getMessage());
                 }
 
+                // Best fitness over time
+                saveFitnessOverTimeCSV();
         }
+
+        static void saveFitnessOverTimeCSV() {
+                String filename = "lab_3_fitness/fitness_over_time_" + PROBLEM_ID + ".csv";
+                Map<Integer, Integer> sortedFitness = new TreeMap<>(fitnessOverTime);
+                try (PrintWriter pw = new PrintWriter(new FileWriter(filename, true))) {
+                        pw.println("Time (s), Best Fitness");
+                        sortedFitness.forEach((key, value) -> pw.printf(key + ", " + value + "\n"));
+                        System.out.println("Saved fitness over time to " + filename);
+                } catch (IOException e) {
+                        System.err.println("Error writing to file: " + e.getMessage());
+                }
+        }
+
 
         public static void output(String out) {
                 // This will get called when the problem code tries to print things,
