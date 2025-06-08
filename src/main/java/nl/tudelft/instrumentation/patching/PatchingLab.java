@@ -41,7 +41,7 @@ public class PatchingLab {
         private static final double P_DELETE = 0.25;
         private static final double P_INSERT = 0.25;
         private static final double P_CHANGE = 0.25;
-        private static final int PROBLEM_ID = 11;
+        private static final int PROBLEM_ID = 15;
 
         private static double annealAdaptive(int generation, int currentBest) {
                 // track when we last saw an improvement
