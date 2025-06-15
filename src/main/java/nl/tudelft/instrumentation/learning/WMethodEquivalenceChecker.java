@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
-import java.util.stream.IntStream;
 
 public class WMethodEquivalenceChecker extends EquivalenceChecker{
 
@@ -20,6 +19,7 @@ public class WMethodEquivalenceChecker extends EquivalenceChecker{
         this.distinguishingSequenceGenerator= dg;
         this.accessSequenceGenerator= ag;
         this.numSamples = numSamples;
+        this.r = new Random();
     }
 
     @Override
@@ -50,6 +50,9 @@ public class WMethodEquivalenceChecker extends EquivalenceChecker{
     }
 
     private Word<String> getRandomElement(List<Word<String>> list) {
+        System.out.println(list);
+        System.out.println(list.size());
+        System.out.println();
         return list.get(r.nextInt(list.size()));
     }
 

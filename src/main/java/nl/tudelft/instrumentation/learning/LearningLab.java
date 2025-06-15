@@ -20,7 +20,7 @@ public class LearningLab {
     static List<Word<String>> counterExampleList = new ArrayList<>();
 
     static final long startTime = System.currentTimeMillis();
-    static final int PROBLEM_ID = 1;
+    static final int PROBLEM_ID = 4;
     static final String OUTPUT_FILE = "lab_4_output/output_" + PROBLEM_ID + ".csv";
 
     private static void makeTableClosedAndConsistent() throws InterruptedException {
@@ -49,12 +49,15 @@ public class LearningLab {
         hypothesis.writeToDot("hypothesis.dot");
 
         if (hypothesis.getStates().length > numStates) {
-            int timeElapsed = (int) (long) (System.currentTimeMillis() - startTime) / 1000;
+            int timeElapsed = (int) (System.currentTimeMillis() - startTime);
             numStates = hypothesis.getStates().length;
 
             // Append to output
+            boolean fileExists = new java.io.File(OUTPUT_FILE).exists();
             try (PrintWriter pw = new PrintWriter(new FileWriter(OUTPUT_FILE, true))) {
-                pw.println("Time (s), Best Fitness \n");
+                if (!fileExists) {
+                    pw.println("Time (s), Best Fitness \n");
+                }
                 pw.printf(timeElapsed + ", " + numStates + "\n");
                 System.out.println("Saved fitness over time to " + OUTPUT_FILE);
             } 
@@ -114,7 +117,7 @@ public class LearningLab {
         SystemUnderLearn sul = new RersSUL();
         observationTable = new ObservationTable(LearningTracker.inputSymbols, sul);
         // equivalenceChecker = new RandomWalkEquivalenceChecker(sul, LearningTracker.inputSymbols, 100, 1000);
-        equivalenceChecker = new WMethodEquivalenceChecker(sul, LearningTracker.inputSymbols, 1, observationTable, observationTable, 1000);
+        equivalenceChecker = new WMethodEquivalenceChecker(sul, LearningTracker.inputSymbols, 3, observationTable, observationTable, 1000);
 
         observationTable.print();
         // Moved to updateHypothesis
@@ -146,6 +149,7 @@ public class LearningLab {
             }
         }
 
+        System.out.println("Runtime: " + (System.currentTimeMillis() - startTime));
         System.out.println("Final state count: " + hypothesis.getStates().length);
         System.out.println("Learning finished.");
     }
