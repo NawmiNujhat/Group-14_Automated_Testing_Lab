@@ -67,8 +67,46 @@ public class LearningLab {
     private static Word<String> handleCounterExample(Word<String> word) {
         RersSUL sul = new RersSUL();
 
-        // TODO: implement handling of counter example
-        throw new UnsupportedOperationException("Unimplemented method 'handleCounterExample'");
+        String expectedOutput = sul.getLastOutput(word); 
+
+        // Get all expanded access sequences
+        List<Word<String>> expandedAccess = observationTable.getExpandedAccessSequences();
+        // Sort from shortest to longest to prioritize minimal prefixes
+        expandedAccess.sort(Comparator.comparingInt(w -> w.asList().size()));
+
+        List<Word<String>> accessSequences = observationTable.getAccessSequences();
+        
+        // Clone the counterexample
+        Word<String> current = new Word(word.asList());  
+
+        // Iterate over prefixes (expanded access sequences)
+        for (int i = expandedAccess.size() - 1; i >= 0; i--) {
+            Word<String> prefix = expandedAccess.get(i);
+
+            if (current.toString().startsWith(prefix.toString())) {
+                // Find a representative access sequence whose row matches that of the prefix
+                for (Word<String> s : accessSequences) {
+                    if (observationTable.getTableRow(prefix).equals(observationTable.getTableRow(s))) {
+                        int prefixLength = prefix.asList().size();
+                        List<String> suffix = current.asList().subList(prefixLength, current.asList().size());
+                        Word<String> reconstructed = s.append(suffix);
+
+                        // Check if reconstructed input behaves differently than original
+                        if (!sul.getLastOutput(reconstructed).equals(expectedOutput)) {
+                            // Return distinguishing suffix
+                            return new Word<>(suffix);  
+                        } else {
+                            // Retry search with different prefix
+                            i = expandedAccess.size();
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        // No distinguishable suffix found
+        return null;  
     }
 
     static void run() {

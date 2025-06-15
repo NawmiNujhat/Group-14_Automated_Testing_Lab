@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Map.Entry;
+import java.util.stream.Collectors;
 
 /**
  * @author Bram Verboom
@@ -295,6 +296,16 @@ public class ObservationTable implements DistinguishingSequenceGenerator, Access
             }
             System.out.printf("| %s|\n", String.join("| ", row));
         }
+    }
+
+    public List<Word<String>> getExpandedAccessSequences() {
+        return S.stream()
+            .flatMap(s -> Arrays.stream(inputSymbols).map(s::append))
+            .collect(Collectors.toList());
+    }
+
+    public ArrayList<String> getTableRow(Word<String> key) {
+        return table.get(key);
     }
 
     @Override
