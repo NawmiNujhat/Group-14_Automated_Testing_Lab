@@ -53,7 +53,14 @@ public class ObservationTable implements DistinguishingSequenceGenerator, Access
      *         with something usefull to extend the observation table with.
      */
     public Optional<Word<String>> checkForClosed() {
-        // TODO implement the check for closedness of the observation table.
+        for (Word<String> s : S) {
+            for (String a : inputSymbols) {
+                Word<String> sa = s.append(a);
+                List<String> saRow = table.get(sa);
+                boolean isRepresented = S.stream().anyMatch(t -> table.get(t).equals(saRow));
+                if (!isRepresented) return Optional.of(sa);
+            }
+        }
         return Optional.empty();
     }
 
