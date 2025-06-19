@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Map.Entry;
+import java.util.stream.Collectors;
 
 /**
  * @author Bram Verboom
@@ -53,7 +54,18 @@ public class ObservationTable implements DistinguishingSequenceGenerator, Access
      *         with something usefull to extend the observation table with.
      */
     public Optional<Word<String>> checkForClosed() {
-        // TODO implement the check for closedness of the observation table.
+        for (Word<String> s : S) {
+            for (String a : inputSymbols) {
+                Word<String> sa = s.append(a);
+                List<String> saRow = table.get(sa);
+                // Check if any row in S matches the row of sa
+                boolean isRepresented = S.stream().anyMatch(t -> table.get(t).equals(saRow));
+                // If not represented, the table is not closed
+                if (!isRepresented) return Optional.of(sa);
+            }
+        }
+
+        // Table is closed
         return Optional.empty();
     }
 
@@ -66,7 +78,29 @@ public class ObservationTable implements DistinguishingSequenceGenerator, Access
      *         with something usefull to extend the observation table with.
      */
     public Optional<Word<String>> checkForConsistent() {
-        // TODO implement the consistency check.
+        for (int i = 0; i < S.size(); i++) {
+            for (int j = i + 1; j < S.size(); j++) {
+                Word<String> s1 = S.get(i), s2 = S.get(j);
+                // Only check pairs of s1, s2 that have identical rows
+                if (!table.get(s1).equals(table.get(s2))) continue;
+
+                for (String a : inputSymbols) {
+                    List<String> s1a = table.get(s1.append(a));
+                    List<String> s2a = table.get(s2.append(a));
+                    if (!s1a.equals(s2a)) {
+                        // Find the distinguishing suffix in E
+                        for (int k = 0; k < E.size(); k++) {
+                            if (!s1a.get(k).equals(s2a.get(k))) {
+                                // This suffix distinguishes s1a from s2a
+                                return Optional.of(s1.append(E.get(k)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Table is consistent
         return Optional.empty();
     }
 
@@ -262,6 +296,16 @@ public class ObservationTable implements DistinguishingSequenceGenerator, Access
             }
             System.out.printf("| %s|\n", String.join("| ", row));
         }
+    }
+
+    public List<Word<String>> getExpandedAccessSequences() {
+        return S.stream()
+            .flatMap(s -> Arrays.stream(inputSymbols).map(s::append))
+            .collect(Collectors.toList());
+    }
+
+    public ArrayList<String> getTableRow(Word<String> key) {
+        return table.get(key);
     }
 
     @Override
