@@ -1,5 +1,4 @@
 package nl.tudelft.instrumentation.patching;
-
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -24,9 +23,9 @@ public class PatchingLab {
         private static int[] failCount;
         private static int totalPass, totalFail;
         private static final Random RNG = new Random();
-        private static final int POP_SIZE = 50;
+        private static final int POP_SIZE = 100;
         private static final int MAX_GEN = 500;
-        private static final double BASE_MUT_P = 0.10;
+        private static final double BASE_MUT_P = 0.2;
         private static final int TOP_SUSPECTS = 5;
         private static final String[] NUMERIC_OPS = { ">", "<", ">=", "<=", "==", "!=" };
         private static final String[] BOOLEAN_OPS = { "==", "!=" };
@@ -41,17 +40,19 @@ public class PatchingLab {
         private static final double P_DELETE = 0.25;
         private static final double P_INSERT = 0.25;
         private static final double P_CHANGE = 0.25;
-        private static final int PROBLEM_ID = 7;
+        private static final int PROBLEM_ID = 15;
+        static boolean[] isBooleanCtx;
 
         private static double annealAdaptive(int generation, int currentBest) {
-
+                // track when we last saw an improvement
                 if (currentBest < prevBest) {
                         prevBest = currentBest;
                         lastImprovementGen = generation;
                 }
+                // base linear decay
+                double base = 0.30 - (0.29 * generation / (MAX_GEN - 1)); // from .30 → .01
 
-                double base = 0.30 - (0.29 * generation / (MAX_GEN - 1));
-
+                // if stuck for too long, inject a “restart” spike
                 int stuck = generation - lastImprovementGen;
                 if (stuck > STAGNATE_GENS) {
                         // ramp back to 30% then continue decay
@@ -62,6 +63,7 @@ public class PatchingLab {
         }
 
         static String[] complexMutate(String[] parent) {
+                // work on a List so we can add/remove
                 List<String> genes = new ArrayList<>(Arrays.asList(parent));
                 double r = RNG.nextDouble();
 
@@ -74,24 +76,30 @@ public class PatchingLab {
                         }
 
                 } else if (r < P_SWAP + P_DELETE) {
+                        // 2) delete one random gene (if size > 1)
                         if (genes.size() > 1) {
                                 genes.remove(RNG.nextInt(genes.size()));
                         }
 
                 } else if (r < P_SWAP + P_DELETE + P_INSERT) {
-                        // 3) insert a brand‐new (randomAlt) gene at random position
-                        String template = originalOperators[RNG.nextInt(numOperators)];
-                        String newOp = randomAlt(template);
+
+                        int ctx = RNG.nextInt(numOperators);
+                        String template = originalOperators[ctx];
                         int pos = RNG.nextInt(genes.size() + 1);
-                        genes.add(pos, newOp);
+                        genes.add(pos, randomAlt(template, ctx));
 
                 } else {
+                        // 4) change one gene in place (your old randomAlt)
                         int i = RNG.nextInt(genes.size());
-                        genes.set(i, randomAlt(genes.get(i)));
+                        genes.set(i, randomAlt(genes.get(i), i));
                 }
 
+                // if you really need a fixed length, you can now
+                // either truncate or pad back to parent.length:
                 while (genes.size() < parent.length) {
-                        genes.add(randomAlt(originalOperators[RNG.nextInt(numOperators)]));
+                        // pad with a random pick
+                        int newOp = RNG.nextInt(numOperators);
+                        genes.add(randomAlt(originalOperators[newOp], newOp));
                 }
                 if (genes.size() > parent.length) {
                         genes = genes.subList(0, parent.length);
@@ -99,6 +107,28 @@ public class PatchingLab {
 
                 return genes.toArray(new String[0]);
         }
+        // static String[] complexMutate(String[] parent) {
+        // String[] child = parent.clone();
+        // switch (RNG.nextInt(4)) {
+        // case 0: // swap two positions
+        // int a = RNG.nextInt(numOperators), b = RNG.nextInt(numOperators);
+        // String tmp = child[a]; child[a] = child[b]; child[b] = tmp;
+        // break;
+        // case 1: // delete → replace with random alt (keeps array length)
+        // int d = RNG.nextInt(numOperators);
+        // child[d] = randomAlt(child[d]);
+        // break;
+        // case 2: // insert new op at random slot
+        // int ins = RNG.nextInt(numOperators);
+        // child[ins] = randomAlt(originalOperators[ins]);
+        // break;
+        // case 3: // change single op
+        // int c = RNG.nextInt(numOperators);
+        // child[c] = randomAlt(child[c]);
+        // break;
+        // }
+        // return child;
+        // }
 
         static void initialize() {
                 // initialize the population based on OperatorTracker.operators
@@ -108,19 +138,23 @@ public class PatchingLab {
                 failCount = new int[numOperators];
                 execBitMap = new boolean[numOperators];
                 tarantulaScore = new double[numOperators];
+                isBooleanCtx = new boolean[numOperators];
 
         }
 
         static int runAndCollect() {
                 Arrays.fill(passCount, 0);
                 Arrays.fill(failCount, 0);
+                
                 totalPass = totalFail = 0;
                 int nTests = OperatorTracker.tests.size();
                 int failing = 0;
                 for (int i = 0; i < nTests; i++) {
                         // System.out.println("Number of tests: " + nTests);
                         Arrays.fill(execBitMap, false);
+                        
                         boolean passed = OperatorTracker.runTest(i);
+                        
                         if (passed)
                                 totalPass++;
                         else {
@@ -162,15 +196,13 @@ public class PatchingLab {
                 return false;
         }
 
-        static boolean encounteredOperator(String operator, boolean left, boolean right, int operator_nr) {
-                // Do something useful
-                execBitMap[operator_nr] = true;
-                String replacement = OperatorTracker.operators[operator_nr];
-                if (replacement.equals("!="))
-                        return left != right;
-                if (replacement.equals("=="))
-                        return left == right;
-                return false;
+        static boolean encounteredOperator(String op, boolean left, boolean right,
+                        int nr) {
+                execBitMap[nr] = true;
+                isBooleanCtx[nr] = true;
+                String repl = OperatorTracker.operators[nr];
+                return repl.equals("!=") ? (left != right)
+                                : (left == right); // only == or !=
         }
 
         static void computeTarantula() {
@@ -197,17 +229,17 @@ public class PatchingLab {
                         String[] ind = originalOperators.clone();
                         for (int i = 0; i < numOperators; i++) {
                                 if (RNG.nextDouble() < BASE_MUT_P)
-                                        ind[i] = randomAlt(ind[i]);
+                                        ind[i] = randomAlt(ind[i], i);
                         }
-                        pop.add(ind);
+                        pop.add(ind.clone());
 
                 }
                 return pop;
 
         }
 
-        static String randomAlt(String current) {
-                String[] pool = (current.equals("==") || current.equals("!=")) ? BOOLEAN_OPS : NUMERIC_OPS;
+        static String randomAlt(String current, int idx) {
+                String[] pool = isBooleanCtx[idx] ? BOOLEAN_OPS : NUMERIC_OPS;
                 String alt;
                 do {
                         alt = pool[RNG.nextInt(pool.length)];
@@ -226,7 +258,7 @@ public class PatchingLab {
                 double total = 0;
                 double[] weights = new double[fitnesses.size()];
                 for (int i = 0; i < fitnesses.size(); i++) {
-                        weights[i] = 1.0 / (fitnesses.get(i) + 1);
+                        weights[i] = 1.0 / (fitnesses.get(i) + 1 + 1e-6);
                         total += weights[i];
                 }
                 // spin
@@ -257,6 +289,16 @@ public class PatchingLab {
                 System.out.println("passCount sum   = " + Arrays.stream(passCount).sum());
                 System.out.println("totalFail check = " + totalFail);
                 System.out.println("totalPass check = " + totalPass);
+        }
+
+        static void flipK(String[] genome, int k) {
+                if (k <= 0)
+                        return;
+                k = Math.min(k, numOperators);
+                IntStream.generate(() -> RNG.nextInt(numOperators))
+                                .distinct()
+                                .limit(k)
+                                .forEach(idx -> genome[idx] = randomAlt(genome[idx], idx));
         }
 
         static void run() {
@@ -307,11 +349,12 @@ public class PatchingLab {
                         }
                         if (isFinished)
                                 break;
-                        // System.out.println("Best Fit: " + bestFit);
+                        System.out.println("Best Fit: " + bestFit);
                         OperatorTracker.operators = globalBest;
                         runAndCollect();
                         computeTarantula();
                         int[] hot = rankBySuspiciousNess();
+                        System.out.printf("hot[0]=%d score=%.3f%n", hot[0], tarantulaScore[hot[0]]);
                         System.out.printf("[G%03d] gen-best=%d   overall-best=%d%n",
                                         generation, genBest, bestFit);
                         List<String[]> nextPop = new ArrayList<>(POP_SIZE);
@@ -324,28 +367,24 @@ public class PatchingLab {
                                 String[] dad = population.get(p2);
                                 double baseM = annealAdaptive(generation, bestFit);
 
-                                // uniform‐crossover then mutate
                                 String[] child = new String[numOperators];
-                                double mProb = 0.0;
-                                for (int i = 0; i < numOperators; i++) {
-                                        // pick gene from mom or dad
+                                for (int i = 0; i < numOperators; i++)
                                         child[i] = RNG.nextBoolean() ? mom[i] : dad[i];
-                                        boolean isHot = false;
-                                        for (int j = 0; j < TOP_SUSPECTS; j++) {
 
-                                                if (hot[j] == i) {
-                                                        isHot = true;
-                                                        break;
-                                                }
-
-                                        }
-                                        mProb = baseM + (isHot ? baseM * 4 : 0);
-
-                                }
-                                if (RNG.nextDouble() < mProb) {
+                                for (int i = 0; i < numOperators; i++) {
+                                        double p = baseM;                      
+                                        for (int k = 0; k < TOP_SUSPECTS; k++) 
+                                            if (hot[k] == i) { p = 0.90; break; }
+                                    
+                                        if (RNG.nextDouble() < p)
+                                            child[i] = randomAlt(child[i], i);
+                                    }
+                                    
+                                if (RNG.nextDouble() < 0.02) {
                                         child = complexMutate(child);
                                 }
                                 nextPop.add(child);
+
                         }
 
                         population = nextPop;
@@ -376,7 +415,7 @@ public class PatchingLab {
                 }
 
                 // Best fitness over time
-                saveFitnessOverTimeCSV();
+                // saveFitnessOverTimeCSV();
         }
 
         static void saveFitnessOverTimeCSV() {
@@ -398,3 +437,5 @@ public class PatchingLab {
                 // System.out.println(out);
         }
 }
+
+

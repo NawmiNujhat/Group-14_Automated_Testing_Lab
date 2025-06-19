@@ -27,3 +27,5 @@ generation=11,best_failing_tests=0
 generation=23,best_failing_tests=0
 generation=40,best_failing_tests=0
 generation=15,best_failing_tests=0
+generation=10,best_failing_tests=144
+generation=12,best_failing_tests=144
