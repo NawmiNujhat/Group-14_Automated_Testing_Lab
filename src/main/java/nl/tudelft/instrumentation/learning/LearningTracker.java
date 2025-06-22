@@ -22,6 +22,7 @@ public class LearningTracker {
 
     // Longest a single testcase is allowed to run
     static final int timeoutMS = 1000;
+    private static int membershipQueryCount = 0;
 
     /**
      * Append the output of the program to a list containing all outputs.
@@ -73,6 +74,7 @@ public class LearningTracker {
      * @param sequence the fuzzed sequence that needs top be run.
      */
     public static String[] runNextTrace(String[] sequence) {
+        membershipQueryCount++;
         reset();
         problem.setSequence(sequence);
         currentInput = sequence;
@@ -103,5 +105,8 @@ public class LearningTracker {
         current_index++;
         outputs.add(currentOutput);
         currentOutput = "";
+    }
+    public static int getMembershipQueryCount() {
+        return membershipQueryCount;
     }
 }

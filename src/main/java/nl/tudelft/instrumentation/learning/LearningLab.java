@@ -20,7 +20,7 @@ public class LearningLab {
     static List<Word<String>> counterExampleList = new ArrayList<>();
 
     static final long startTime = System.currentTimeMillis();
-    static final int PROBLEM_ID = 4;
+    static final int PROBLEM_ID = 7;
     static final String OUTPUT_FILE = "lab_4_output/output_" + PROBLEM_ID + ".csv";
 
     private static void makeTableClosedAndConsistent() throws InterruptedException {
@@ -29,12 +29,18 @@ public class LearningLab {
 
         while (!(closed && consistent)) {
             closed = observationTable.checkForClosed()
-                .map(w -> { observationTable.addToS(w); return false; })
-                .orElse(true);
+                    .map(w -> {
+                        observationTable.addToS(w);
+                        return false;
+                    })
+                    .orElse(true);
 
             consistent = observationTable.checkForConsistent()
-                .map(w -> { observationTable.addToE(w); return false; })
-                .orElse(true);
+                    .map(w -> {
+                        observationTable.addToE(w);
+                        return false;
+                    })
+                    .orElse(true);
 
             if (!consistent) {
                 closed = false;
@@ -60,8 +66,7 @@ public class LearningLab {
                 }
                 pw.printf(timeElapsed + ", " + numStates + "\n");
                 System.out.println("Saved fitness over time to " + OUTPUT_FILE);
-            } 
-            catch (IOException e) {
+            } catch (IOException e) {
                 System.err.println("Error writing to file: " + e.getMessage());
             }
         }
@@ -70,7 +75,7 @@ public class LearningLab {
     private static Word<String> handleCounterExample(Word<String> word) {
         RersSUL sul = new RersSUL();
 
-        String expectedOutput = sul.getLastOutput(word); 
+        String expectedOutput = sul.getLastOutput(word);
 
         // Get all expanded access sequences
         List<Word<String>> expandedAccess = observationTable.getExpandedAccessSequences();
@@ -78,9 +83,9 @@ public class LearningLab {
         expandedAccess.sort(Comparator.comparingInt(w -> w.asList().size()));
 
         List<Word<String>> accessSequences = observationTable.getAccessSequences();
-        
+
         // Clone the counterexample
-        Word<String> current = new Word(word.asList());  
+        Word<String> current = new Word(word.asList());
 
         // Iterate over prefixes (expanded access sequences)
         for (int i = expandedAccess.size() - 1; i >= 0; i--) {
@@ -97,7 +102,7 @@ public class LearningLab {
                         // Check if reconstructed input behaves differently than original
                         if (!sul.getLastOutput(reconstructed).equals(expectedOutput)) {
                             // Return distinguishing suffix
-                            return new Word<>(suffix);  
+                            return new Word<>(suffix);
                         } else {
                             // Retry search with different prefix
                             i = expandedAccess.size();
@@ -109,15 +114,17 @@ public class LearningLab {
         }
 
         // No distinguishable suffix found
-        return null;  
+        return null;
     }
 
     static void run() {
 
         SystemUnderLearn sul = new RersSUL();
         observationTable = new ObservationTable(LearningTracker.inputSymbols, sul);
-        // equivalenceChecker = new RandomWalkEquivalenceChecker(sul, LearningTracker.inputSymbols, 100, 1000);
-        equivalenceChecker = new WMethodEquivalenceChecker(sul, LearningTracker.inputSymbols, 3, observationTable, observationTable, 1000);
+        // equivalenceChecker = new RandomWalkEquivalenceChecker(sul,
+        // LearningTracker.inputSymbols, 100, 1000);
+        equivalenceChecker = new WMethodEquivalenceChecker(sul, LearningTracker.inputSymbols, 3, observationTable,
+                observationTable, 1000);
 
         observationTable.print();
         // Moved to updateHypothesis
@@ -127,7 +134,8 @@ public class LearningLab {
 
         // Place here your code to learn a model of the RERS problem.
         // Implement the checks for consistent and closed in the observation table.
-        // Use the observation table and the equivalence checker to implement the L* learning algorithm.
+        // Use the observation table and the equivalence checker to implement the L*
+        // learning algorithm.
         while (!isFinished) {
             try {
                 makeTableClosedAndConsistent();
@@ -138,9 +146,19 @@ public class LearningLab {
                     counterExampleList.add(counterExample.get());
 
                     Word<String> finalCounterExample = handleCounterExample(counterExample.get());
-                    if (finalCounterExample == null) isFinished = true;
-
-                    observationTable.addToE(finalCounterExample);
+                    if (finalCounterExample != null) {
+                        observationTable.addToE(finalCounterExample);
+                        observationTable.fillTable();
+                    }
+                    else {
+                        // Fallback: add all suffixes
+                        List<String> cexList = counterExample.get().asList();
+                        for (int i = 0; i < cexList.size(); i++) {
+                            Word<String> suffix = new Word<>(cexList.subList(i, cexList.size()));
+                            observationTable.addToE(suffix);
+                        }
+                        observationTable.fillTable();
+                    }
                 } else {
                     isFinished = true;
                 }
@@ -148,12 +166,23 @@ public class LearningLab {
                 e.printStackTrace();
             }
         }
+        long runtime = System.currentTimeMillis() - startTime;
+        int stateCount = hypothesis.getStates().length;
+        long membershipQueries = LearningTracker.getMembershipQueryCount();
+        String stats = "Runtime: " + runtime + "\n" +
+                "Final state count: " + stateCount + "\n" +
+                "Membership Queries: " + membershipQueries + "\n" +
+                "Learning finished.\n";
 
-        System.out.println("Runtime: " + (System.currentTimeMillis() - startTime));
-        System.out.println("Final state count: " + hypothesis.getStates().length);
-        System.out.println("Learning finished.");
+        System.out.print(stats);
+        try (PrintWriter pw = new PrintWriter(new FileWriter(OUTPUT_FILE, true))) {
+            pw.print(stats);
+            System.out.println("Wrote statistics to " + OUTPUT_FILE);
+        } catch (IOException e) {
+            System.err.println("Error writing statistics to file: " + e.getMessage());
+        }
+
     }
-
 
     /**
      * Method that is used for catching the output from standard out.

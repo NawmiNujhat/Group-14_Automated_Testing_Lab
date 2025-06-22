@@ -61,7 +61,8 @@ public class ObservationTable implements DistinguishingSequenceGenerator, Access
                 // Check if any row in S matches the row of sa
                 boolean isRepresented = S.stream().anyMatch(t -> table.get(t).equals(saRow));
                 // If not represented, the table is not closed
-                if (!isRepresented) return Optional.of(sa);
+                if (!isRepresented)
+                    return Optional.of(sa);
             }
         }
 
@@ -82,7 +83,8 @@ public class ObservationTable implements DistinguishingSequenceGenerator, Access
             for (int j = i + 1; j < S.size(); j++) {
                 Word<String> s1 = S.get(i), s2 = S.get(j);
                 // Only check pairs of s1, s2 that have identical rows
-                if (!table.get(s1).equals(table.get(s2))) continue;
+                if (!table.get(s1).equals(table.get(s2)))
+                    continue;
 
                 for (String a : inputSymbols) {
                     List<String> s1a = table.get(s1.append(a));
@@ -124,6 +126,7 @@ public class ObservationTable implements DistinguishingSequenceGenerator, Access
             for (String symbol : inputSymbols) {
                 addRow(prefix.append(symbol));
             }
+            fillTable();
         }
     }
 
@@ -141,6 +144,7 @@ public class ObservationTable implements DistinguishingSequenceGenerator, Access
                 Word<String> joined = entry.getKey().append(suffix);
                 entry.getValue().add(getResultFromSul(joined));
             }
+            fillTable();
         }
     }
 
@@ -232,6 +236,27 @@ public class ObservationTable implements DistinguishingSequenceGenerator, Access
         return String.join(SEPERATOR, trace);
     }
 
+    public void fillTable() {
+        List<Word<String>> allRows = new ArrayList<>(S);
+
+        for (Word<String> s : S) {
+            for (String a : inputSymbols) {
+                Word<String> sa = s.append(a);
+                if (!allRows.contains(sa)) {
+                    allRows.add(sa);
+                }
+            }
+        }
+
+        for (Word<String> row : allRows) {
+            ArrayList<String> filledRow = new ArrayList<>();
+            for (Word<String> e : E) {
+                filledRow.add(getResultFromSul(row.append(e))); // always query the SUL!
+            }
+            table.put(row, filledRow);
+        }
+    }
+
     /**
      * Method to print the observation table in a nice way.
      */
@@ -300,8 +325,8 @@ public class ObservationTable implements DistinguishingSequenceGenerator, Access
 
     public List<Word<String>> getExpandedAccessSequences() {
         return S.stream()
-            .flatMap(s -> Arrays.stream(inputSymbols).map(s::append))
-            .collect(Collectors.toList());
+                .flatMap(s -> Arrays.stream(inputSymbols).map(s::append))
+                .collect(Collectors.toList());
     }
 
     public ArrayList<String> getTableRow(Word<String> key) {

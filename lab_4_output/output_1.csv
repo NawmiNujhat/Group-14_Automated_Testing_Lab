@@ -10,3 +10,53 @@ Time (s), Best Fitness
 380, 73
 400, 76
 419, 85
+546, 13
+629, 15
+844, 23
+915, 27
+1004, 36
+1087, 45
+1176, 55
+1315, 64
+1429, 73
+1642, 76
+1842, 85
+Runtime: 81440
+Final state count: 35
+Membership Queries: 854888
+Learning finished.
+412, 15
+466, 25
+509, 26
+5166, 32
+7543, 40
+573, 13
+672, 15
+894, 23
+971, 27
+1061, 36
+1140, 45
+1249, 55
+1359, 64
+1538, 73
+1696, 76
+1894, 85
+Runtime: 84492
+Final state count: 35
+Membership Queries: 854888
+Learning finished.
+533, 13
+641, 15
+875, 23
+954, 27
+1045, 36
+1131, 45
+1262, 55
+1372, 64
+1562, 73
+1747, 76
+1936, 85
+Runtime: 84317
+Final state count: 35
+Membership Queries: 854888
+Learning finished.
