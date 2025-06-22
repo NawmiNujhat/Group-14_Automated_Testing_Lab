@@ -102,3 +102,17 @@ Runtime: 262006
 Final state count: 55
 Membership Queries: 2512850
 Learning finished.
+#Labreport
+399, 15
+449, 25
+499, 26
+4972, 32
+7293, 40
+11224, 44
+11808, 45
+12355, 46
+14951, 89
+Runtime: 250138
+Final state count: 55
+Membership Queries: 2512850
+Learning finished.

@@ -142,3 +142,37 @@ Runtime: 6057381
 Final state count: 107
 Membership Queries: 26251574
 Learning finished.
+498, 13
+589, 15
+836, 23
+922, 27
+1010, 36
+1095, 45
+1193, 55
+1319, 64
+1507, 73
+1692, 76
+1849, 85
+Runtime: 83530
+Final state count: 35
+Membership Queries: 854888
+Learning finished.
+#Labreport
+2877, 28
+3183, 29
+3444, 30
+3792, 44
+6837, 51
+7306, 52
+19718, 68
+20680, 70
+28303, 71
+29351, 73
+45274, 78
+61632, 124
+443875, 140
+496159, 146
+Runtime: 2771289
+Final state count: 107
+Membership Queries: 26251574
+Learning finished.

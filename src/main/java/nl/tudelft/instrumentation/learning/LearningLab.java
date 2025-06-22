@@ -52,7 +52,8 @@ public class LearningLab {
 
     private static void updateHypothesis() {
         hypothesis = observationTable.generateHypothesis();
-        hypothesis.writeToDot("hypothesis.dot");
+        String filename="hypothesis_"+PROBLEM_ID+".dot";
+        hypothesis.writeToDot(filename);
 
         if (hypothesis.getStates().length > numStates) {
             int timeElapsed = (int) (System.currentTimeMillis() - startTime);

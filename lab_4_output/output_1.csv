@@ -60,3 +60,19 @@ Runtime: 84317
 Final state count: 35
 Membership Queries: 854888
 Learning finished.
+#Lab report
+505, 13
+599, 15
+812, 23
+904, 27
+990, 36
+1073, 45
+1171, 55
+1298, 64
+1499, 73
+1681, 76
+1878, 85
+Runtime: 83086
+Final state count: 35
+Membership Queries: 854888
+Learning finished.
